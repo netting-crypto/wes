@@ -15,10 +15,14 @@ slurm_mem="${SLURM_MEM:-4G}"
 slurm_extra_args="${SLURM_EXTRA_ARGS:-}"
 
 mkdir -p "$slurm_log_dir" "$output_dir" "$(dirname "$storage_state_path")"
+debug_log="$slurm_log_dir/submit.log"
 
 if [[ -n "${STORAGE_STATE_JSON:-}" ]]; then
   printf '%s' "$STORAGE_STATE_JSON" > "$storage_state_path"
 fi
+
+# Clear inherited sbatch defaults so CI submission is driven only by explicit SLURM_* variables.
+unset SBATCH_ACCOUNT SBATCH_QOS SBATCH_PARTITION SBATCH_TIME SBATCH_MEM_PER_CPU SBATCH_MEM_PER_NODE SBATCH_MEM_PER_GPU SBATCH_GPUS SBATCH_NODES
 
 submit_cmd=(
   sbatch
@@ -59,13 +63,21 @@ submit_cmd+=("$project_dir/scripts/slurm-job.sh")
 
 echo "Submitting Slurm job from $project_dir"
 echo "SBATCH command: ${submit_cmd[*]}"
+{
+  echo "Submitting Slurm job from $project_dir"
+  echo "SBATCH command: ${submit_cmd[*]}"
+  echo "--- type -a sbatch ---"
+  type -a sbatch || true
+  echo "--- Relevant environment variables ---"
+  env | sort | grep -E '^(SBATCH|SLURM|SQUEUE|SACCT|PATH)=' || true
+} > "$debug_log"
 
 set +e
 submit_output="$("${submit_cmd[@]}" 2>&1)"
 submit_status=$?
 set -e
 
-printf '%s\n' "$submit_output" > "$slurm_log_dir/submit.log"
+printf '%s\n' "$submit_output" >> "$debug_log"
 
 if [[ -n "$submit_output" ]]; then
   printf '%s\n' "$submit_output"

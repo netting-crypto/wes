@@ -9,7 +9,7 @@ slurm_job_name="${SLURM_JOB_NAME:-wes-pipeline}"
 slurm_partition="${SLURM_PARTITION:-}"
 slurm_account="${SLURM_ACCOUNT:-}"
 slurm_qos="${SLURM_QOS:-}"
-slurm_time="${SLURM_TIME:-02:00:00}"
+slurm_time="${SLURM_TIME:-00:30:00}"
 slurm_cpus="${SLURM_CPUS_PER_TASK:-2}"
 slurm_mem="${SLURM_MEM:-4G}"
 slurm_extra_args="${SLURM_EXTRA_ARGS:-}"
@@ -27,12 +27,15 @@ submit_cmd=(
   --export=ALL
   --chdir "$project_dir"
   --job-name "$slurm_job_name"
-  --time "$slurm_time"
   --cpus-per-task "$slurm_cpus"
   --mem "$slurm_mem"
   --output "$slurm_log_dir/slurm-%j.out"
   --error "$slurm_log_dir/slurm-%j.err"
 )
+
+if [[ -n "$slurm_time" ]]; then
+  submit_cmd+=(--time "$slurm_time")
+fi
 
 if [[ -n "$slurm_partition" ]]; then
   submit_cmd+=(--partition "$slurm_partition")
@@ -62,6 +65,8 @@ submit_output="$("${submit_cmd[@]}" 2>&1)"
 submit_status=$?
 set -e
 
+printf '%s\n' "$submit_output" > "$slurm_log_dir/submit.log"
+
 if [[ -n "$submit_output" ]]; then
   printf '%s\n' "$submit_output"
 fi
@@ -70,6 +75,9 @@ job_id="$(printf '%s\n' "$submit_output" | sed -n '1s/^\([0-9][0-9]*\).*/\1/p')"
 if [[ -n "$job_id" ]]; then
   printf '%s\n' "$job_id" > "$slurm_log_dir/job-id.txt"
   echo "Slurm job id: $job_id"
+else
+  echo "Could not parse a Slurm job id from sbatch output" >&2
+  submit_status=1
 fi
 
 stdout_log=""

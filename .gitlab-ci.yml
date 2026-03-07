@@ -6,19 +6,20 @@ variables:
   OUTPUT_DIR: "$CI_PROJECT_DIR/output/reports"
   STORAGE_STATE_PATH: "$CI_PROJECT_DIR/data/storage-state.json"
   TEMPLATE_DIR: "$CI_PROJECT_DIR/templates"
+  SLURM_JOB_NAME: "wes-pipeline"
+  SLURM_TIME: "02:00:00"
+  SLURM_CPUS_PER_TASK: "2"
+  SLURM_MEM: "4G"
 
 run_task:
   stage: run
   tags:
     - wes
   script:
-    - npm ci
-    - npx playwright install chromium
-    - mkdir -p "$CI_PROJECT_DIR/data"
-    - if [ -n "$STORAGE_STATE_JSON" ]; then printf '%s' "$STORAGE_STATE_JSON" > "$STORAGE_STATE_PATH"; fi
-    - npm run pipeline
+    - bash scripts/ci-submit-slurm.sh
   artifacts:
     when: always
     expire_in: 7 days
     paths:
       - output/reports/
+      - output/slurm/

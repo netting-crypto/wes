@@ -9,6 +9,8 @@ const OUTPUT_DIR = process.env.OUTPUT_DIR ? path.resolve(process.env.OUTPUT_DIR)
 const STORAGE_STATE = process.env.STORAGE_STATE_PATH ? path.resolve(process.env.STORAGE_STATE_PATH) : path.resolve("data", "storage-state.json");
 const TEMPLATE_DIR = process.env.TEMPLATE_DIR ? path.resolve(process.env.TEMPLATE_DIR) : path.resolve("templates");
 const HEADLESS = !/^(0|false)$/i.test(process.env.HEADLESS ?? "1");
+const START_PAGE = Math.max(Number.parseInt(process.env.START_PAGE ?? "1", 10) || 1, 1);
+const END_PAGE = Math.max(Number.parseInt(process.env.END_PAGE ?? "0", 10) || 0, 0);
 
 const ELECTRO_REQUIREMENTS = [
   "对小鼠离体脑片神经元进行膜片钳记录，检测静息膜电位、动作电位发放及突触电流变化。",

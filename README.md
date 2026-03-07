@@ -1,58 +1,98 @@
-﻿# USTC 综合科研仪器共享平台自动化
+# USTC 综合科研仪器共享平台自动化
 
-这个仓库现在已经补齐了适合 GitLab 的自动化链路基础：
+这个仓库现在按 Slurm 队列模式执行：
 
 - 本机写代码并 `git push` 到 GitLab
-- GitLab Pipeline 在你的服务器 Runner 上自动执行任务
+- GitLab shell runner 只负责在登录节点提交 `sbatch`
+- 真正的任务在 Slurm 计算节点里执行
 - 任务结束后自动产出 Excel、`summary.json`、`summary.md`、`summary.html`
-- 在 GitLab Job 的 `Artifacts` 里直接下载初步结果报告
+- 在 GitLab Job 的 `Artifacts` 里下载结果和 Slurm 日志
 
-## 你要完成的基础连接
+## 当前执行链路
 
-### 1. 这台电脑连上 GitLab
+1. 你在本地提交代码到 GitLab
+2. GitLab 触发项目里的 `run_task`
+3. Runner 在登录节点执行 `bash scripts/ci-submit-slurm.sh`
+4. `ci-submit-slurm.sh` 提交 `scripts/slurm-job.sh` 到 Slurm
+5. Slurm 作业在计算节点里执行 `npm ci`、`npx playwright install chromium`、`npm run pipeline`
+6. 结果写回 `output/reports/`，GitLab 再把它作为 artifacts 保存
 
-先在这台 Windows 机器上配置 Git 用户和 SSH Key：
+## Runner 在线方式
 
-```powershell
-git config --global user.name "你的名字"
-git config --global user.email "你的邮箱"
-ssh-keygen -t ed25519 -C "你的邮箱"
-Get-Content $env:USERPROFILE\.ssh\id_ed25519.pub
+你现在的 runner 是 user-mode。它在线时需要在服务器上保持一个常驻进程：
+
+```bash
+cd ~/00soft/github_runner
+nohup ./gitlab-runner run > runner.log 2>&1 &
 ```
 
-把公钥加到 GitLab 的 `Preferences -> SSH Keys`，然后把仓库远端地址配上：
+检查是否在线：
 
-```powershell
-git remote add origin git@gitlab.example.com:group/project.git
-ssh -T git@gitlab.example.com
-git push -u origin main
+```bash
+./gitlab-runner verify
 ```
 
-### 2. 你的服务器接 GitLab Runner
+如果你只想前台观察日志，也可以直接运行：
 
-推荐在你的服务器上安装 `gitlab-runner`，并注册成 `shell runner`，标签要和仓库里的 `.gitlab-ci.yml` 一致，也就是 `task-runner`。
+```bash
+./gitlab-runner run
+```
 
-Runner 需要满足：
+## GitLab CI 需要的输入
 
-- 已安装 Node.js
-- 能执行 `npm ci`
-- 能运行 Playwright Chromium
-- 能访问目标业务网站
+### 1. 登录态
 
-### 3. 给 Pipeline 提供登录态和模板
+先在本机执行：
 
-这个项目跑自动任务需要两类外部文件：
+```powershell
+npm.cmd run capture-auth
+```
 
-- 登录态：`storage-state.json`
-- Excel 模板：放在 `templates/` 目录下
+生成 `data/storage-state.json` 后，把文件全文保存到 GitLab CI/CD Variable：
 
-推荐做法：
+- 变量名：`STORAGE_STATE_JSON`
 
-1. 先在本机执行 `npm.cmd run capture-auth` 获取 `data/storage-state.json`
-2. 打开这个 JSON 文件，把完整内容存进 GitLab CI/CD Variable `STORAGE_STATE_JSON`
-3. 把 Excel 模板文件提交到仓库的 `templates/` 目录，或者在 GitLab 变量里覆盖 `TEMPLATE_DIR`
+流水线开始时会自动把它写回 `data/storage-state.json`。
 
-`.gitlab-ci.yml` 已经支持在流水线开始时把 `STORAGE_STATE_JSON` 写回 `data/storage-state.json`。
+### 2. Excel 模板
+
+把模板 Excel 文件提交到仓库的 `templates/` 目录。
+
+默认会从这里读取模板：
+
+- [templates](C:/Users/witch/Documents/Playground/templates)
+
+### 3. Slurm 参数
+
+下面这些变量可以直接在 GitLab CI/CD Variables 里配置：
+
+- `SLURM_PARTITION`：指定分区
+- `SLURM_ACCOUNT`：指定账户
+- `SLURM_QOS`：指定 qos
+- `SLURM_TIME`：任务时限，默认 `02:00:00`
+- `SLURM_CPUS_PER_TASK`：默认 `2`
+- `SLURM_MEM`：默认 `4G`
+- `SLURM_EXTRA_ARGS`：额外 `sbatch` 参数
+- `SLURM_ENV_SETUP`：任务启动前执行的环境初始化命令
+
+如果你的集群需要先加载模块或 conda，再跑 Node，可以把它写到 `SLURM_ENV_SETUP`，例如：
+
+```bash
+source ~/.bashrc && conda activate base
+```
+
+或者：
+
+```bash
+source /etc/profile && module load nodejs
+```
+
+### 4. 可选跳过项
+
+如果服务器环境已经准备好依赖，可以设置：
+
+- `SKIP_NPM_CI=1`
+- `SKIP_PLAYWRIGHT_INSTALL=1`
 
 ## 本地使用
 
@@ -89,13 +129,17 @@ npm.cmd run pipeline
 
 ## 输出结果
 
-默认输出目录改成了仓库内的 `output/reports/`，其中包含：
+默认输出目录是 `output/reports/`，其中包含：
 
 - `summary.json`：完整原始汇总数据
 - `stats.json`：统计摘要
 - `summary.md`：简版文字结果
 - `summary.html`：可直接打开看的图表报告
 - 多个 `.xlsx`：按记录导出的 Excel
+
+Slurm 相关日志会写到：
+
+- `output/slurm/`
 
 ## 已支持的环境变量
 
@@ -104,6 +148,8 @@ npm.cmd run pipeline
 - `STORAGE_STATE_PATH`：覆盖登录态文件路径
 - `HEADLESS`：默认 `1`，服务器上无头运行；设成 `0` 可显示浏览器
 - `CHROME_PATH`：如果你要复用系统 Chrome，可指定浏览器路径
+- `START_PAGE`：从第几页开始处理，默认 `1`
+- `END_PAGE`：处理到第几页，默认 `0` 表示到最后一页
 
 ## 首次联调时你需要核对
 

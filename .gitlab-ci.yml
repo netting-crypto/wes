@@ -10,7 +10,7 @@ variables:
 run_task:
   stage: run
   tags:
-    - task-runner
+    - wes
   script:
     - npm ci
     - npx playwright install chromium

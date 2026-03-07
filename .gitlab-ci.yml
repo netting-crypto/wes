@@ -7,7 +7,6 @@ variables:
   STORAGE_STATE_PATH: "$CI_PROJECT_DIR/data/storage-state.json"
   TEMPLATE_DIR: "$CI_PROJECT_DIR/templates"
   SLURM_JOB_NAME: "wes-pipeline"
-  SLURM_TIME: "00:30:00"
   SLURM_CPUS_PER_TASK: "2"
   SLURM_MEM: "4G"
 

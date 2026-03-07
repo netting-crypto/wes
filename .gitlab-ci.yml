@@ -1,4 +1,4 @@
-﻿stages:
+stages:
   - run
 
 variables:
@@ -7,16 +7,15 @@ variables:
   STORAGE_STATE_PATH: "$CI_PROJECT_DIR/data/storage-state.json"
   TEMPLATE_DIR: "$CI_PROJECT_DIR/templates"
 
-run-task:
+run_task:
   stage: run
   tags:
     - task-runner
-  before_script:
+  script:
     - npm ci
     - npx playwright install chromium
     - mkdir -p "$CI_PROJECT_DIR/data"
     - if [ -n "$STORAGE_STATE_JSON" ]; then printf '%s' "$STORAGE_STATE_JSON" > "$STORAGE_STATE_PATH"; fi
-  script:
     - npm run pipeline
   artifacts:
     when: always

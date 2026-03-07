@@ -1,0 +1,27 @@
+﻿{
+  "loginUrl": "https://yqzx.ustc.edu.cn/lfsms/record/myrecord?f=record&c=lfsmsrecordmyrecord",
+  "listUrl": "https://yqzx.ustc.edu.cn/lfsms/record/myrecord?f=record&c=lfsmsrecordmyrecord",
+  "list": {
+    "row": "table tbody tr",
+    "emptyHint": "暂无数据",
+    "nextPageButton": "a:has-text('下一页'), button:has-text('下一页')"
+  },
+  "row": {
+    "recordId": "[data-field='id']",
+    "instrumentName": "[data-field='instrument'], td:nth-child(3)",
+    "sampleName": "[data-field='sample_name'], td:nth-child(4)",
+    "sampleCount": "[data-field='sample_count'], td:nth-child(5)",
+    "lockedBadge": ".label-danger, .badge-danger, .status-locked",
+    "lockedTextPattern": "锁定|已锁定",
+    "editLink": "a:has-text('编辑'), a[title='编辑']"
+  },
+  "edit": {
+    "contentField": "textarea[name='test_content'], textarea",
+    "saveButton": "button:has-text('保存'), input[value='保存']",
+    "confirmDialog": ".layui-layer:has-text('请仔细核对'), .modal:has-text('请仔细核对')",
+    "confirmDialogConfirm": ".layui-layer-btn0, .modal-footer .btn-primary",
+    "successDialog": ".layui-layer:has-text('成功'), .modal:has-text('成功')",
+    "successDialogConfirm": ".layui-layer-btn0, .modal-footer .btn-primary",
+    "backToListHint": "我的测试"
+  }
+}

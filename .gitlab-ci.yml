@@ -1,0 +1,25 @@
+﻿stages:
+  - run
+
+variables:
+  HEADLESS: "1"
+  OUTPUT_DIR: "$CI_PROJECT_DIR/output/reports"
+  STORAGE_STATE_PATH: "$CI_PROJECT_DIR/data/storage-state.json"
+  TEMPLATE_DIR: "$CI_PROJECT_DIR/templates"
+
+run-task:
+  stage: run
+  tags:
+    - task-runner
+  before_script:
+    - npm ci
+    - npx playwright install chromium
+    - mkdir -p "$CI_PROJECT_DIR/data"
+    - if [ -n "$STORAGE_STATE_JSON" ]; then printf '%s' "$STORAGE_STATE_JSON" > "$STORAGE_STATE_PATH"; fi
+  script:
+    - npm run pipeline
+  artifacts:
+    when: always
+    expire_in: 7 days
+    paths:
+      - output/reports/

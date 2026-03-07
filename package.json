@@ -1,0 +1,17 @@
+{
+  "name": "ustc-lfsms-automation",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Automation for USTC instrument platform test record updates and Excel generation.",
+  "type": "module",
+  "scripts": {
+    "capture-auth": "node scripts/capture-auth.js",
+    "run": "node scripts/run.js",
+    "report": "node scripts/report.js",
+    "pipeline": "npm run run && npm run report"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "playwright": "^1.52.0"
+  }
+}

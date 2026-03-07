@@ -10,8 +10,10 @@ slurm_partition="${SLURM_PARTITION:-}"
 slurm_account="${SLURM_ACCOUNT:-}"
 slurm_qos="${SLURM_QOS:-}"
 slurm_time="${SLURM_TIME:-}"
-slurm_cpus="${SLURM_CPUS_PER_TASK:-2}"
-slurm_mem="${SLURM_MEM:-4G}"
+slurm_nodes="${SLURM_NODES:-1}"
+slurm_ntasks="${SLURM_NTASKS:-1}"
+slurm_cpus="${SLURM_CPUS_PER_TASK:-4}"
+slurm_mem="${SLURM_MEM:-8G}"
 slurm_extra_args="${SLURM_EXTRA_ARGS:-}"
 
 mkdir -p "$slurm_log_dir" "$output_dir" "$(dirname "$storage_state_path")"
@@ -22,7 +24,7 @@ if [[ -n "${STORAGE_STATE_JSON:-}" ]]; then
 fi
 
 # Clear inherited sbatch defaults so CI submission is driven only by explicit SLURM_* variables.
-unset SBATCH_ACCOUNT SBATCH_QOS SBATCH_PARTITION SBATCH_TIME SBATCH_MEM_PER_CPU SBATCH_MEM_PER_NODE SBATCH_MEM_PER_GPU SBATCH_GPUS SBATCH_NODES
+unset SBATCH_ACCOUNT SBATCH_QOS SBATCH_PARTITION SBATCH_TIME SBATCH_MEM_PER_CPU SBATCH_MEM_PER_NODE SBATCH_MEM_PER_GPU SBATCH_GPUS SBATCH_NODES SBATCH_NTASKS SBATCH_CPUS_PER_TASK
 
 submit_cmd=(
   sbatch
@@ -31,6 +33,8 @@ submit_cmd=(
   --export=ALL
   --chdir "$project_dir"
   --job-name "$slurm_job_name"
+  --nodes "$slurm_nodes"
+  --ntasks "$slurm_ntasks"
   --cpus-per-task "$slurm_cpus"
   --mem "$slurm_mem"
   --output "$slurm_log_dir/slurm-%j.out"

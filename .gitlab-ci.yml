@@ -6,6 +6,12 @@ variables:
   WES_RESULTS_SUBDIR: "results"
   WES_LOGS_SUBDIR: "logs"
   WES_MODE: "smoke"
+  WES_FASTQ_DIR: "/home/zhangmeigroup/luoxin23/upload20251105/fastq"
+  WES_TEST_R1: "/home/zhangmeigroup/luoxin23/upload20251105/fastq/2103022S1OWC_S12_R1_001.fastq.gz"
+  WES_TEST_R2: "/home/zhangmeigroup/luoxin23/upload20251105/fastq/2103022S1OWC_S12_R2_001.fastq.gz"
+  WES_INSTALL_SMOKE: "1"
+  WES_CONDA_CHANNELS: "conda-forge bioconda"
+  WES_CONDA_PACKAGES: "bwa bcftools gatk4 fastqc"
 
   SLURM_JOB_NAME: "wes-pipeline"
   SLURM_PARTITION: "CPU-64C256GB"

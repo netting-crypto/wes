@@ -24,6 +24,7 @@ That smoke test checks:
 - whether common bioinformatics commands are already present
 - whether the output directory is writable
 - whether one chosen FASTQ pair is visible from the compute node
+- whether `conda` can install the missing tools on the compute node
 - whether the configured reference / BED / known-sites paths exist
 
 1. Copy `config/wes/run.env.example` to `config/wes/run.env`
@@ -65,6 +66,8 @@ bash pipelines/wes-germline.sh \
 The smoke-test job writes:
 
 - `output/wes/logs/smoke-test.log`
+- `output/wes/logs/conda-create.stdout.log`
+- `output/wes/logs/conda-create.stderr.log`
 - `output/wes/smoke-summary.txt`
 - `output/wes/tree.txt`
 - Slurm stdout / stderr under `output/wes/slurm/`

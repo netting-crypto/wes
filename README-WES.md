@@ -72,6 +72,9 @@ The smoke-test job writes:
 - `output/wes/tree.txt`
 - Slurm stdout / stderr under `output/wes/slurm/`
 
+The temporary conda environment is intentionally created outside `output/wes/`
+and removed at the end, so GitLab artifacts stay small enough to upload.
+
 ## Family structures supported
 
 - proband + father + mother

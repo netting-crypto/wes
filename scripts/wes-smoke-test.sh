@@ -9,7 +9,7 @@ result_dir="$output_dir/$result_subdir"
 log_dir="$output_dir/$logs_subdir"
 smoke_dir="$result_dir/smoke-test"
 install_smoke="${WES_INSTALL_SMOKE:-1}"
-conda_env_prefix="${WES_CONDA_ENV_PREFIX:-$smoke_dir/conda-smoke-env}"
+conda_env_prefix="${WES_CONDA_ENV_PREFIX:-${TMPDIR:-/tmp}/wes-conda-smoke-${SLURM_JOB_ID:-$$}}"
 conda_channels="${WES_CONDA_CHANNELS:-conda-forge bioconda}"
 conda_packages="${WES_CONDA_PACKAGES:-bwa bcftools gatk4 fastqc}"
 
@@ -158,6 +158,11 @@ summary="$output_dir/smoke-summary.txt"
   echo "test_r1=${WES_TEST_R1:-}"
   echo "test_r2=${WES_TEST_R2:-}"
 } > "$summary"
+
+if [[ -d "$conda_env_prefix" ]]; then
+  echo "Cleaning temporary conda env: $conda_env_prefix"
+  rm -rf "$conda_env_prefix"
+fi
 
 echo
 echo "Smoke test finished."

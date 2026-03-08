@@ -1,29 +1,29 @@
 stages:
-  - run
+  - wes
 
 variables:
-  HEADLESS: "1"
-  OUTPUT_DIR: "$CI_PROJECT_DIR/output/reports"
-  STORAGE_STATE_PATH: "$CI_PROJECT_DIR/data/storage-state.json"
-  TEMPLATE_DIR: "$CI_PROJECT_DIR/templates"
+  OUTPUT_DIR: "$CI_PROJECT_DIR/output/wes"
+  WES_RESULTS_SUBDIR: "results"
+  WES_LOGS_SUBDIR: "logs"
+  WES_MODE: "smoke"
+
   SLURM_JOB_NAME: "wes-pipeline"
   SLURM_PARTITION: "CPU-64C256GB"
   SLURM_QOS: "qos_cpu_64c256gb"
   SLURM_NODES: "1"
   SLURM_NTASKS: "1"
-  SLURM_CPUS_PER_TASK: "4"
-  SLURM_MEM: "8G"
-  SLURM_TIME: "04:00:00"
+  SLURM_CPUS_PER_TASK: "16"
+  SLURM_MEM: "64G"
+  SLURM_TIME: "24:00:00"
 
-run_task:
-  stage: run
+wes_submit:
+  stage: wes
   tags:
     - wes
   script:
     - bash scripts/ci-submit-slurm.sh
   artifacts:
     when: always
-    expire_in: 7 days
+    expire_in: 14 days
     paths:
-      - output/reports/
-      - output/slurm/
+      - output/wes/

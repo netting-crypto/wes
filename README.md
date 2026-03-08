@@ -141,6 +141,18 @@ Slurm 相关日志会写到：
 
 - `output/slurm/`
 
+## WES 试跑骨架
+
+仓库里新增了一套适合小型家系 WES 首次试跑的骨架：
+
+- `README-WES.md`
+- `pipelines/wes-germline.sh`
+- `scripts/wes-check-server.sh`
+- `config/wes/run.env.example`
+- `config/wes/samples.example.tsv`
+
+建议先跑服务器检查脚本，再做单样本 smoke test。
+
 ## 已支持的环境变量
 
 - `OUTPUT_DIR`：覆盖输出目录

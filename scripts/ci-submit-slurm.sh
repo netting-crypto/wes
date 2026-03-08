@@ -2,9 +2,12 @@
 set -euo pipefail
 
 project_dir="${CI_PROJECT_DIR:-$(pwd)}"
-output_dir="${OUTPUT_DIR:-$project_dir/output/reports}"
-storage_state_path="${STORAGE_STATE_PATH:-$project_dir/data/storage-state.json}"
-slurm_log_dir="${SLURM_LOG_DIR:-$project_dir/output/slurm}"
+output_dir="${OUTPUT_DIR:-$project_dir/output/wes}"
+slurm_log_dir="${SLURM_LOG_DIR:-$output_dir/slurm}"
+result_subdir="${WES_RESULTS_SUBDIR:-results}"
+logs_subdir="${WES_LOGS_SUBDIR:-logs}"
+result_dir="$output_dir/$result_subdir"
+wes_logs_dir="$output_dir/$logs_subdir"
 slurm_job_name="${SLURM_JOB_NAME:-wes-pipeline}"
 slurm_partition="${SLURM_PARTITION:-}"
 slurm_account="${SLURM_ACCOUNT:-}"
@@ -12,16 +15,12 @@ slurm_qos="${SLURM_QOS:-}"
 slurm_time="${SLURM_TIME:-}"
 slurm_nodes="${SLURM_NODES:-1}"
 slurm_ntasks="${SLURM_NTASKS:-1}"
-slurm_cpus="${SLURM_CPUS_PER_TASK:-4}"
-slurm_mem="${SLURM_MEM:-8G}"
+slurm_cpus="${SLURM_CPUS_PER_TASK:-16}"
+slurm_mem="${SLURM_MEM:-64G}"
 slurm_extra_args="${SLURM_EXTRA_ARGS:-}"
 
-mkdir -p "$slurm_log_dir" "$output_dir" "$(dirname "$storage_state_path")"
+mkdir -p "$slurm_log_dir" "$result_dir" "$wes_logs_dir"
 debug_log="$slurm_log_dir/submit.log"
-
-if [[ -n "${STORAGE_STATE_JSON:-}" ]]; then
-  printf '%s' "$STORAGE_STATE_JSON" > "$storage_state_path"
-fi
 
 # Clear inherited sbatch defaults so CI submission is driven only by explicit SLURM_* variables.
 unset SBATCH_ACCOUNT SBATCH_QOS SBATCH_PARTITION SBATCH_TIME SBATCH_MEM_PER_CPU SBATCH_MEM_PER_NODE SBATCH_MEM_PER_GPU SBATCH_GPUS SBATCH_NODES SBATCH_NTASKS SBATCH_CPUS_PER_TASK
@@ -68,12 +67,12 @@ submit_cmd+=("$project_dir/scripts/slurm-job.sh")
 echo "Submitting Slurm job from $project_dir"
 echo "SBATCH command: ${submit_cmd[*]}"
 {
-  echo "Submitting Slurm job from $project_dir"
+  echo "Submitting WES Slurm job from $project_dir"
   echo "SBATCH command: ${submit_cmd[*]}"
   echo "--- type -a sbatch ---"
   type -a sbatch || true
   echo "--- Relevant environment variables ---"
-  env | sort | grep -E '^(SBATCH|SLURM|SQUEUE|SACCT|PATH)=' || true
+  env | sort | grep -E '^(SBATCH|SLURM|WES|OUTPUT_DIR|PATH)=' || true
 } > "$debug_log"
 
 set +e
@@ -116,7 +115,19 @@ if [[ $submit_status -ne 0 ]]; then
   exit "$submit_status"
 fi
 
-if [[ -d "$output_dir" ]]; then
-  echo "Artifacts prepared in $output_dir"
-  find "$output_dir" -maxdepth 2 -type f | sort
+manifest="$output_dir/result-manifest.txt"
+{
+  echo "job_id=$job_id"
+  echo "slurm_stdout=$stdout_log"
+  echo "slurm_stderr=$stderr_log"
+  echo "submit_log=$debug_log"
+  echo "results_dir=$result_dir"
+  echo "wes_logs_dir=$wes_logs_dir"
+  echo "wes_mode=${WES_MODE:-smoke}"
+} > "$manifest"
+
+if command -v find >/dev/null 2>&1; then
+  find "$output_dir" -maxdepth 3 -type f | sort > "$output_dir/tree.txt" || true
 fi
+
+echo "WES artifacts prepared in $output_dir"

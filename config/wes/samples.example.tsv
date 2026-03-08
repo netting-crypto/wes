@@ -1,0 +1,7 @@
+sample_id	family_id	role	affected	fastq_r1	fastq_r2	bam_path
+AMD001	FAM001	proband	1	/home/zhangmeigroup/luoxin23/upload20251105/fastq/AMD001_R1.fastq.gz	/home/zhangmeigroup/luoxin23/upload20251105/fastq/AMD001_R2.fastq.gz	
+AMD001_F	FAM001	father	0	/home/zhangmeigroup/luoxin23/upload20251105/fastq/AMD001_F_R1.fastq.gz	/home/zhangmeigroup/luoxin23/upload20251105/fastq/AMD001_F_R2.fastq.gz	
+AMD001_M	FAM001	mother	0	/home/zhangmeigroup/luoxin23/upload20251105/fastq/AMD001_M_R1.fastq.gz	/home/zhangmeigroup/luoxin23/upload20251105/fastq/AMD001_M_R2.fastq.gz	
+AMD002	FAM002	proband	1	/home/zhangmeigroup/luoxin23/upload20251105/fastq/AMD002_R1.fastq.gz	/home/zhangmeigroup/luoxin23/upload20251105/fastq/AMD002_R2.fastq.gz	
+AMD002_F	FAM002	father	0	/home/zhangmeigroup/luoxin23/upload20251105/fastq/AMD002_F_R1.fastq.gz	/home/zhangmeigroup/luoxin23/upload20251105/fastq/AMD002_F_R2.fastq.gz	
+AMD003	FAM003	proband	1	/home/zhangmeigroup/luoxin23/upload20251105/fastq/AMD003_R1.fastq.gz	/home/zhangmeigroup/luoxin23/upload20251105/fastq/AMD003_R2.fastq.gz	

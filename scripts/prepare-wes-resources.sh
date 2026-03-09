@@ -13,6 +13,7 @@ Usage:
     [--bed-url URL] \
     [--vep-cache-url URL] \
     [--skip-download] \
+    [--allow-missing-known-sites] \
     [--skip-vep]
 
 What this script does:
@@ -36,6 +37,7 @@ BED_URL=""
 VEP_CACHE_URL=""
 SKIP_DOWNLOAD=0
 SKIP_VEP=0
+ALLOW_MISSING_KNOWN_SITES=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -47,6 +49,7 @@ while [[ $# -gt 0 ]]; do
     --bed-url) BED_URL="$2"; shift 2 ;;
     --vep-cache-url) VEP_CACHE_URL="$2"; shift 2 ;;
     --skip-download) SKIP_DOWNLOAD=1; shift ;;
+    --allow-missing-known-sites) ALLOW_MISSING_KNOWN_SITES=1; shift ;;
     --skip-vep) SKIP_VEP=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage; exit 2 ;;
@@ -69,6 +72,7 @@ need_cmd() {
 download_to() {
   local url="$1"
   local out="$2"
+  local required="${3:-1}"
   if [[ -z "$url" ]]; then
     echo "Skip download for $out because URL is empty"
     return 0
@@ -78,7 +82,25 @@ download_to() {
     return 0
   fi
   echo "Downloading: $url"
-  curl -L --fail --retry 3 -o "$out" "$url"
+  if [[ "$url" == *.gz && "$out" != *.gz ]]; then
+    tmp_out="${out}.download.gz"
+    rm -f "$tmp_out"
+    if curl -L --fail --retry 3 -o "$tmp_out" "$url"; then
+      gzip -dc "$tmp_out" > "$out"
+      rm -f "$tmp_out"
+      return 0
+    fi
+    rm -f "$tmp_out"
+  elif curl -L --fail --retry 3 -o "$out" "$url"; then
+    return 0
+  fi
+
+  if [[ "$required" == "1" ]]; then
+    echo "Required download failed: $url" >&2
+    return 1
+  fi
+  echo "Optional download failed and will be skipped: $url"
+  return 0
 }
 
 index_vcf_if_needed() {
@@ -102,6 +124,7 @@ index_vcf_if_needed() {
 need_cmd bash
 need_cmd mkdir
 need_cmd curl
+need_cmd gzip
 need_cmd samtools
 need_cmd gatk
 need_cmd tabix
@@ -121,10 +144,14 @@ exec > >(tee -a "$log_file") 2>&1
 echo "Preparing WES resources under: $BASE_DIR"
 
 if [[ "$SKIP_DOWNLOAD" -eq 0 ]]; then
-  download_to "$REF_URL" "$REF_FA"
-  download_to "$DBSNP_URL" "$DBSNP_VCF"
-  download_to "$KNOWN_INDELS_URL" "$KNOWN_INDELS_VCF"
-  download_to "$MILLS_URL" "$MILLS_VCF"
+  download_to "$REF_URL" "$REF_FA" 1
+  optional_known_sites_required=1
+  if [[ "$ALLOW_MISSING_KNOWN_SITES" -eq 1 ]]; then
+    optional_known_sites_required=0
+  fi
+  download_to "$DBSNP_URL" "$DBSNP_VCF" "$optional_known_sites_required"
+  download_to "$KNOWN_INDELS_URL" "$KNOWN_INDELS_VCF" "$optional_known_sites_required"
+  download_to "$MILLS_URL" "$MILLS_VCF" "$optional_known_sites_required"
   download_to "$BED_URL" "$TARGET_BED"
   if [[ "$SKIP_VEP" -eq 0 ]]; then
     download_to "$VEP_CACHE_URL" "$VEP_ARCHIVE"

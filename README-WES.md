@@ -65,6 +65,11 @@ bash pipelines/wes-germline.sh \
   --skip-fastqc
 ```
 
+If the reference is ready but Broad-style known-sites files are still being
+collected, do the first real run with `--skip-bqsr`. The example
+`config/wes/run.env.example` now sets `WES_PIPELINE_EXTRA_ARGS="--skip-bqsr"`
+for that first pass.
+
 7. After that, run one family with `--family-id FAM001`
 
 ## Smoke-test outputs

@@ -9,6 +9,7 @@ resource_base="${WES_RESOURCE_BASE:-/home/zhangmeigroup/luoxin23/resources/hg38}
 conda_env_prefix="${WES_CONDA_ENV_PREFIX:-${TMPDIR:-/tmp}/wes-resource-conda-${SLURM_JOB_ID:-$$}}"
 conda_channels="${WES_CONDA_CHANNELS:-conda-forge bioconda}"
 conda_packages="${WES_RESOURCE_CONDA_PACKAGES:-samtools gatk4 htslib}"
+allow_missing_known_sites="${WES_ALLOW_MISSING_KNOWN_SITES:-0}"
 
 mkdir -p "$output_dir" "$log_dir"
 
@@ -73,6 +74,9 @@ prepare_args=(
 if [[ -n "${BED_URL:-}" ]]; then
   prepare_args+=(--bed-url "$BED_URL")
 fi
+if [[ "$allow_missing_known_sites" == "1" ]]; then
+  prepare_args+=(--allow-missing-known-sites)
+fi
 if [[ "${WES_SKIP_VEP:-1}" == "1" ]]; then
   prepare_args+=(--skip-vep)
 elif [[ -n "${VEP_CACHE_URL:-}" ]]; then
@@ -93,6 +97,7 @@ summary="$output_dir/prepare-resources-summary.txt"
   echo "log=$log_file"
   echo "resource_base=$resource_base"
   echo "manifest=$manifest"
+  echo "allow_missing_known_sites=$allow_missing_known_sites"
   echo "ref=$resource_base/reference/Homo_sapiens_assembly38.fasta"
   echo "dbsnp=$resource_base/known-sites/Homo_sapiens_assembly38.dbsnp138.vcf"
   echo "known_indels=$resource_base/known-sites/Homo_sapiens_assembly38.known_indels.vcf.gz"

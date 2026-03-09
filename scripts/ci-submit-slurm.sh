@@ -115,6 +115,31 @@ if [[ $submit_status -ne 0 ]]; then
   exit "$submit_status"
 fi
 
+if command -v sacct >/dev/null 2>&1 && [[ -n "$job_id" ]]; then
+  sacct_line="$(sacct -P -n -j "$job_id" -o JobIDRaw,State,ExitCode | awk -F'|' -v id="$job_id" '$1 == id { print; exit }')"
+  if [[ -n "$sacct_line" ]]; then
+    IFS='|' read -r sacct_job_id sacct_state sacct_exit <<< "$sacct_line"
+    echo "Slurm final state: $sacct_state"
+    echo "Slurm exit code: $sacct_exit"
+    case "$sacct_state" in
+      COMPLETED)
+        ;;
+      *)
+        echo "Slurm job did not complete successfully: state=$sacct_state exit_code=$sacct_exit" >&2
+        if [[ -n "$stdout_log" && -f "$stdout_log" ]]; then
+          echo "--- Slurm stdout (tail) ---"
+          tail -n 200 "$stdout_log"
+        fi
+        if [[ -n "$stderr_log" && -f "$stderr_log" ]]; then
+          echo "--- Slurm stderr (tail) ---"
+          tail -n 200 "$stderr_log"
+        fi
+        exit 1
+        ;;
+    esac
+  fi
+fi
+
 manifest="$output_dir/result-manifest.txt"
 {
   echo "job_id=$job_id"

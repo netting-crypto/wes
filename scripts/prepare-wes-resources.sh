@@ -6,6 +6,7 @@ usage() {
 Usage:
   bash scripts/prepare-wes-resources.sh \
     --base-dir /path/to/resources/hg38 \
+    [--threads 8] \
     [--ref-url URL] \
     [--dbsnp-url URL] \
     [--known-indels-url URL] \
@@ -22,6 +23,7 @@ What this script does:
   - Creates a clean hg38 resource directory layout
   - Optionally downloads reference / known-sites / BED / VEP cache
   - Builds .fai and .dict for the reference if missing
+  - Builds BWA index files for the reference if missing
   - Builds .tbi index files for gzipped VCF resources if missing
 
 Recommended use:
@@ -31,6 +33,7 @@ EOF
 }
 
 BASE_DIR=""
+THREADS=1
 REF_URL=""
 DBSNP_URL=""
 KNOWN_INDELS_URL=""
@@ -46,6 +49,7 @@ ALLOW_MISSING_KNOWN_SITES=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --base-dir) BASE_DIR="$2"; shift 2 ;;
+    --threads) THREADS="$2"; shift 2 ;;
     --ref-url) REF_URL="$2"; shift 2 ;;
     --dbsnp-url) DBSNP_URL="$2"; shift 2 ;;
     --known-indels-url) KNOWN_INDELS_URL="$2"; shift 2 ;;
@@ -199,6 +203,7 @@ need_cmd gzip
 need_cmd samtools
 need_cmd gatk
 need_cmd tabix
+need_cmd bwa
 
 mkdir -p "$BASE_DIR"/{reference,known-sites,targets,vep,logs}
 
@@ -214,6 +219,7 @@ log_file="$BASE_DIR/logs/prepare-$(date +%Y%m%d-%H%M%S).log"
 exec > >(tee -a "$log_file") 2>&1
 
 echo "Preparing WES resources under: $BASE_DIR"
+echo "threads=$THREADS"
 
 if [[ "$SKIP_DOWNLOAD" -eq 0 ]]; then
   download_to "$REF_URL" "$REF_FA" 1
@@ -248,6 +254,11 @@ if [[ -f "$REF_FA" ]]; then
     echo "Building sequence dictionary"
     gatk CreateSequenceDictionary -R "$REF_FA" -O "$ref_dict"
   fi
+
+  if [[ ! -f "${REF_FA}.bwt" || ! -f "${REF_FA}.sa" || ! -f "${REF_FA}.ann" || ! -f "${REF_FA}.amb" || ! -f "${REF_FA}.pac" ]]; then
+    echo "Building BWA index"
+    bwa index "$REF_FA"
+  fi
 fi
 
 index_vcf_if_needed "$DBSNP_VCF"
@@ -270,6 +281,7 @@ manifest="$BASE_DIR/resources.manifest.txt"
   echo "date=$(date -Iseconds)"
   echo "base_dir=$BASE_DIR"
   echo "ref=$REF_FA"
+  echo "bwa_index_prefix=$REF_FA"
   echo "bed=$TARGET_BED"
   echo "dbsnp=$DBSNP_VCF"
   echo "known_indels=$KNOWN_INDELS_VCF"

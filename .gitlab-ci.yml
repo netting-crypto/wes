@@ -14,7 +14,7 @@ variables:
   WES_ALLOW_MISSING_KNOWN_SITES: "1"
   WES_CONDA_CHANNELS: "conda-forge bioconda"
   WES_CONDA_PACKAGES: "bwa bcftools gatk4 fastqc"
-  WES_RESOURCE_CONDA_PACKAGES: "samtools gatk4 htslib"
+  WES_RESOURCE_CONDA_PACKAGES: "bwa samtools gatk4 htslib"
   WES_PIPELINE_USE_CONDA: "1"
   WES_PIPELINE_CONDA_PACKAGES: "bwa samtools bcftools gatk4 htslib fastp fastqc"
   WES_SKIP_VEP: "1"
@@ -35,8 +35,8 @@ variables:
   SLURM_QOS: "qos_cpu_64c256gb"
   SLURM_NODES: "1"
   SLURM_NTASKS: "1"
-  SLURM_CPUS_PER_TASK: "16"
-  SLURM_MEM: "64G"
+  SLURM_CPUS_PER_TASK: "24"
+  SLURM_MEM: "96G"
   SLURM_TIME: "24:00:00"
 
 wes_submit:

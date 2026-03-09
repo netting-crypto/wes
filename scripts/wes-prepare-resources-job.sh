@@ -8,7 +8,7 @@ log_dir="$output_dir/$logs_subdir"
 resource_base="${WES_RESOURCE_BASE:-/home/zhangmeigroup/luoxin23/resources/hg38}"
 conda_env_prefix="${WES_CONDA_ENV_PREFIX:-${TMPDIR:-/tmp}/wes-resource-conda-${SLURM_JOB_ID:-$$}}"
 conda_channels="${WES_CONDA_CHANNELS:-conda-forge bioconda}"
-conda_packages="${WES_RESOURCE_CONDA_PACKAGES:-samtools gatk4 htslib}"
+conda_packages="${WES_RESOURCE_CONDA_PACKAGES:-bwa samtools gatk4 htslib}"
 allow_missing_known_sites="${WES_ALLOW_MISSING_KNOWN_SITES:-0}"
 
 mkdir -p "$output_dir" "$log_dir"
@@ -65,6 +65,7 @@ export PATH="$conda_env_prefix/bin:$PATH"
 
 prepare_args=(
   --base-dir "$resource_base"
+  --threads "${SLURM_CPUS_PER_TASK:-1}"
   --ref-url "${REF_URL:-}"
   --dbsnp-url "${DBSNP_URL:-}"
   --known-indels-url "${KNOWN_INDELS_URL:-}"

@@ -30,7 +30,9 @@ That smoke test checks:
 1. Copy `config/wes/run.env.example` to `config/wes/run.env`
 2. Copy `config/wes/samples.example.tsv` to `config/wes/samples.tsv`
 3. Replace the placeholder sample IDs and file paths
-4. For the first GitLab-triggered Slurm run, keep `WES_MODE=smoke`.
+4. The current GitLab / Slurm default first runs `WES_MODE=prepare-resources`.
+   That job prepares a clean `hg38` reference plus Broad-style known-sites files
+   on the compute node under `WES_RESOURCE_BASE`.
 5. On the server run if you want to inspect manually:
 
 ```bash
@@ -46,7 +48,8 @@ source config/wes/resources.env
 bash scripts/prepare-wes-resources.sh --base-dir "$WES_RESOURCE_BASE" --skip-download
 ```
 
-6. After the smoke test succeeds, pick one sample and do a real smoke-test pipeline run:
+6. After the resource-preparation job succeeds, switch back to `WES_MODE=smoke`
+   or `WES_MODE=pipeline` and pick one sample for a real smoke-test pipeline run:
 
 ```bash
 bash pipelines/wes-germline.sh \
@@ -74,6 +77,16 @@ The smoke-test job writes:
 
 The temporary conda environment is intentionally created outside `output/wes/`
 and removed at the end, so GitLab artifacts stay small enough to upload.
+
+## Resource-preparation outputs
+
+The resource-preparation job writes:
+
+- `output/wes/prepare-resources-summary.txt`
+- `output/wes/logs/prepare-resources.log`
+- `output/wes/logs/resource-conda.stdout.log`
+- `output/wes/logs/resource-conda.stderr.log`
+- Slurm stdout / stderr under `output/wes/slurm/`
 
 ## Family structures supported
 

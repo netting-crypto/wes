@@ -17,6 +17,9 @@ fi
 mkdir -p "$output_dir"
 
 case "$wes_mode" in
+  prepare-resources)
+    bash "$project_dir/scripts/wes-prepare-resources-job.sh"
+    ;;
   smoke)
     bash "$project_dir/scripts/wes-smoke-test.sh"
     ;;

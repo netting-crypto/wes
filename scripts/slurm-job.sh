@@ -27,7 +27,11 @@ case "$wes_mode" in
     bash "$project_dir/scripts/wes-find-bed.sh"
     ;;
   pipeline)
-    bash -lc "${WES_PIPELINE_CMD:?WES_PIPELINE_CMD is required when WES_MODE=pipeline}"
+    if [[ "${WES_PIPELINE_USE_CONDA:-1}" == "1" ]]; then
+      bash "$project_dir/scripts/wes-pipeline-job.sh"
+    else
+      bash -lc "${WES_PIPELINE_CMD:?WES_PIPELINE_CMD is required when WES_MODE=pipeline}"
+    fi
     ;;
   *)
     echo "Unsupported WES_MODE: $wes_mode" >&2

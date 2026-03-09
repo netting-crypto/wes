@@ -1,0 +1,2 @@
+sample_id	family_id	role	affected	fastq_r1	fastq_r2	bam_path
+2103022S1OWC	TESTFAM001	proband	1	/home/zhangmeigroup/luoxin23/upload20251105/fastq/2103022S1OWC_S12_R1_001.fastq.gz	/home/zhangmeigroup/luoxin23/upload20251105/fastq/2103022S1OWC_S12_R2_001.fastq.gz	

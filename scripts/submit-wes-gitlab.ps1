@@ -71,6 +71,22 @@ function Get-ProjectPathFromRemote {
     throw "Unsupported git remote URL: $RemoteUrl"
 }
 
+function Get-ApiBaseFromRemote {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RemoteUrl
+    )
+
+    if ($RemoteUrl -match '^https?://') {
+        $uri = [System.Uri]$RemoteUrl
+        return "{0}://{1}/api/v4" -f $uri.Scheme, $uri.Authority
+    }
+    if ($RemoteUrl -match '^[^@]+@([^:]+):') {
+        return "https://$($Matches[1])/api/v4"
+    }
+    throw "Unsupported git remote URL: $RemoteUrl"
+}
+
 function Invoke-GitLabApi {
     param(
         [Parameter(Mandatory = $true)]
@@ -117,8 +133,13 @@ function Wait-ForPipeline {
     $encodedBranch = [System.Uri]::EscapeDataString($Branch)
     while ((Get-Date) -lt $Deadline) {
         $pipelinesUri = "$ApiBase/projects/$ProjectId/pipelines?ref=$encodedBranch&per_page=20"
-        $pipelines = @(Invoke-GitLabApi -Method GET -Uri $pipelinesUri)
-        $matched = $pipelines | Where-Object { $_.sha -eq $Sha } | Select-Object -First 1
+        $pipelinesResponse = Invoke-GitLabApi -Method GET -Uri $pipelinesUri
+        if ($pipelinesResponse -is [System.Array]) {
+            $pipelines = $pipelinesResponse
+        } else {
+            $pipelines = @($pipelinesResponse)
+        }
+        $matched = $pipelines | Where-Object { [string]$_.sha -eq $Sha } | Sort-Object id -Descending | Select-Object -First 1
         if ($null -ne $matched) {
             return $matched
         }
@@ -141,7 +162,12 @@ function Get-PipelineSnapshot {
     $pipelineUri = "$ApiBase/projects/$ProjectId/pipelines/$PipelineId"
     $jobsUri = "$ApiBase/projects/$ProjectId/pipelines/$PipelineId/jobs?per_page=100"
     $pipeline = Invoke-GitLabApi -Method GET -Uri $pipelineUri
-    $jobs = @(Invoke-GitLabApi -Method GET -Uri $jobsUri)
+    $jobsResponse = Invoke-GitLabApi -Method GET -Uri $jobsUri
+    if ($jobsResponse -is [System.Array]) {
+        $jobs = $jobsResponse
+    } else {
+        $jobs = @($jobsResponse)
+    }
     return [pscustomobject]@{
         Pipeline = $pipeline
         Jobs = $jobs
@@ -198,8 +224,7 @@ if ([string]::IsNullOrWhiteSpace($branch)) {
 $remoteUrlOutput = Invoke-Git -Args @("remote", "get-url", "origin")
 $remoteUrl = [string]::Concat($remoteUrlOutput).Trim()
 $projectPath = Get-ProjectPathFromRemote -RemoteUrl $remoteUrl
-$remoteBase = $remoteUrl -replace '/[^/]+(?:\.git)?$', ''
-$apiBase = "$remoteBase/api/v4"
+$apiBase = Get-ApiBaseFromRemote -RemoteUrl $remoteUrl
 
 if (-not $WatchOnly) {
     $status = @(Invoke-Git -Args @("status", "--short"))

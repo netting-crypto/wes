@@ -37,10 +37,11 @@ variables:
   SLURM_NTASKS: "1"
   SLURM_CPUS_PER_TASK: "24"
   SLURM_MEM: "96G"
-  SLURM_TIME: "24:00:00"
+  SLURM_TIME: "48:00:00"
 
 wes_submit:
   stage: wes
+  timeout: 48 hours
   tags:
     - wes
   script:

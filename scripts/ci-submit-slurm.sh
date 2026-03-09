@@ -18,6 +18,7 @@ slurm_ntasks="${SLURM_NTASKS:-1}"
 slurm_cpus="${SLURM_CPUS_PER_TASK:-16}"
 slurm_mem="${SLURM_MEM:-64G}"
 slurm_extra_args="${SLURM_EXTRA_ARGS:-}"
+slurm_poll_interval="${SLURM_POLL_INTERVAL_SECONDS:-60}"
 
 mkdir -p "$slurm_log_dir" "$result_dir" "$wes_logs_dir"
 debug_log="$slurm_log_dir/submit.log"
@@ -27,7 +28,6 @@ unset SBATCH_ACCOUNT SBATCH_QOS SBATCH_PARTITION SBATCH_TIME SBATCH_MEM_PER_CPU 
 
 submit_cmd=(
   sbatch
-  --wait
   --parsable
   --export=ALL
   --chdir "$project_dir"
@@ -75,6 +75,54 @@ echo "SBATCH command: ${submit_cmd[*]}"
   env | sort | grep -E '^(SBATCH|SLURM|WES|OUTPUT_DIR|PATH)=' || true
 } > "$debug_log"
 
+query_job_state() {
+  local id="$1"
+  local state=""
+  local exit_code=""
+
+  if command -v sacct >/dev/null 2>&1; then
+    local sacct_line=""
+    sacct_line="$(sacct -P -n -j "$id" -o JobIDRaw,State,ExitCode 2>/dev/null | awk -F'|' -v job_id="$id" '$1 == job_id { print; exit }')"
+    if [[ -n "$sacct_line" ]]; then
+      IFS='|' read -r _ state exit_code <<< "$sacct_line"
+      printf '%s|%s\n' "$state" "$exit_code"
+      return 0
+    fi
+  fi
+
+  if command -v squeue >/dev/null 2>&1; then
+    state="$(squeue -h -j "$id" -o '%T' 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+    if [[ -n "$state" ]]; then
+      printf '%s|\n' "$state"
+      return 0
+    fi
+  fi
+
+  printf 'UNKNOWN|\n'
+}
+
+emit_new_log_lines() {
+  local label="$1"
+  local path="$2"
+  local last_line="$3"
+  local result_var="$4"
+  local line_count=0
+
+  if [[ -f "$path" ]]; then
+    line_count="$(wc -l < "$path" | tr -d '[:space:]')"
+    if [[ -z "$line_count" ]]; then
+      line_count=0
+    fi
+    if (( line_count > last_line )); then
+      local start_line=$((last_line + 1))
+      echo "--- ${label} (lines $((last_line + 1))-$line_count) ---"
+      sed -n "${start_line},${line_count}p" "$path"
+    fi
+  fi
+
+  printf -v "$result_var" '%s' "$line_count"
+}
+
 set +e
 submit_output="$("${submit_cmd[@]}" 2>&1)"
 submit_status=$?
@@ -115,29 +163,60 @@ if [[ $submit_status -ne 0 ]]; then
   exit "$submit_status"
 fi
 
-if command -v sacct >/dev/null 2>&1 && [[ -n "$job_id" ]]; then
-  sacct_line="$(sacct -P -n -j "$job_id" -o JobIDRaw,State,ExitCode | awk -F'|' -v id="$job_id" '$1 == id { print; exit }')"
-  if [[ -n "$sacct_line" ]]; then
-    IFS='|' read -r sacct_job_id sacct_state sacct_exit <<< "$sacct_line"
-    echo "Slurm final state: $sacct_state"
-    echo "Slurm exit code: $sacct_exit"
-    case "$sacct_state" in
-      COMPLETED)
-        ;;
-      *)
-        echo "Slurm job did not complete successfully: state=$sacct_state exit_code=$sacct_exit" >&2
-        if [[ -n "$stdout_log" && -f "$stdout_log" ]]; then
-          echo "--- Slurm stdout (tail) ---"
-          tail -n 200 "$stdout_log"
-        fi
-        if [[ -n "$stderr_log" && -f "$stderr_log" ]]; then
-          echo "--- Slurm stderr (tail) ---"
-          tail -n 200 "$stderr_log"
-        fi
-        exit 1
+last_stdout_line=0
+last_stderr_line=0
+last_state=""
+slurm_final_state="UNKNOWN"
+slurm_final_exit=""
+
+if [[ -n "$job_id" ]]; then
+  echo "Polling Slurm job every ${slurm_poll_interval}s"
+  while :; do
+    state_record="$(query_job_state "$job_id")"
+    IFS='|' read -r slurm_state slurm_exit_code <<< "$state_record"
+    if [[ -z "$slurm_state" ]]; then
+      slurm_state="UNKNOWN"
+    fi
+
+    if [[ "$slurm_state" != "$last_state" ]]; then
+      echo "Slurm state: $slurm_state"
+      last_state="$slurm_state"
+    fi
+
+    emit_new_log_lines "Slurm stdout" "$stdout_log" "$last_stdout_line" last_stdout_line
+    emit_new_log_lines "Slurm stderr" "$stderr_log" "$last_stderr_line" last_stderr_line
+
+    case "$slurm_state" in
+      COMPLETED|FAILED|CANCELLED|TIMEOUT|OUT_OF_MEMORY|NODE_FAIL|PREEMPTED|BOOT_FAIL|DEADLINE|REVOKED)
+        slurm_final_state="$slurm_state"
+        slurm_final_exit="$slurm_exit_code"
+        break
         ;;
     esac
-  fi
+
+    sleep "$slurm_poll_interval"
+  done
+fi
+
+if [[ -n "$job_id" ]]; then
+  echo "Slurm final state: $slurm_final_state"
+  echo "Slurm exit code: ${slurm_final_exit:-UNKNOWN}"
+  case "$slurm_final_state" in
+    COMPLETED)
+      ;;
+    *)
+      echo "Slurm job did not complete successfully: state=$slurm_final_state exit_code=${slurm_final_exit:-UNKNOWN}" >&2
+      if [[ -n "$stdout_log" && -f "$stdout_log" ]]; then
+        echo "--- Slurm stdout (tail) ---"
+        tail -n 200 "$stdout_log"
+      fi
+      if [[ -n "$stderr_log" && -f "$stderr_log" ]]; then
+        echo "--- Slurm stderr (tail) ---"
+        tail -n 200 "$stderr_log"
+      fi
+      exit 1
+      ;;
+  esac
 fi
 
 manifest="$output_dir/result-manifest.txt"

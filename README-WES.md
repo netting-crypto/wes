@@ -72,6 +72,35 @@ for that first pass.
 
 7. After that, run one family with `--family-id FAM001`
 
+## Stage split
+
+The main pipeline now supports staged execution with `--stage`:
+
+- `all`: full end-to-end run
+- `preprocess`: stop after per-sample BAM generation (`fastp -> bwa mem -> sort -> MarkDuplicates -> optional BQSR`)
+- `gvcf`: use existing BAMs and run per-sample `HaplotypeCaller`
+- `joint`: use existing per-sample gVCFs and run joint calling plus filtering
+
+If `--stage gvcf` or `--stage joint` is used, the script first looks for staged
+files under the current `--out` directory before failing.
+
+Example: batch pre-processing only
+
+```bash
+bash scripts/generate-wes-sample-sheet.sh \
+  --fastq-dir /path/to/fastq \
+  --out config/wes/samples.generated.tsv
+
+bash pipelines/wes-germline.sh \
+  --sample-sheet config/wes/samples.generated.tsv \
+  --out output/wes/results/preprocess-only \
+  --ref /path/to/Homo_sapiens_assembly38.fasta \
+  --bed /path/to/exome_targets.bed \
+  --threads 24 \
+  --skip-bqsr \
+  --stage preprocess
+```
+
 ## Smoke-test outputs
 
 The smoke-test job writes:

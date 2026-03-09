@@ -3,6 +3,7 @@ set -euo pipefail
 
 project_dir="${CI_PROJECT_DIR:-$(pwd)}"
 output_dir="${OUTPUT_DIR:-$project_dir/output/wes}"
+wes_mode="${WES_MODE:-smoke}"
 slurm_log_dir="${SLURM_LOG_DIR:-$output_dir/slurm}"
 result_subdir="${WES_RESULTS_SUBDIR:-results}"
 logs_subdir="${WES_LOGS_SUBDIR:-logs}"
@@ -22,6 +23,11 @@ slurm_poll_interval="${SLURM_POLL_INTERVAL_SECONDS:-60}"
 
 mkdir -p "$slurm_log_dir" "$result_dir" "$wes_logs_dir"
 debug_log="$slurm_log_dir/submit.log"
+
+if [[ "$wes_mode" == "preprocess-batch" ]]; then
+  bash "$project_dir/scripts/wes-submit-preprocess-array.sh"
+  exit 0
+fi
 
 # Clear inherited sbatch defaults so CI submission is driven only by explicit SLURM_* variables.
 unset SBATCH_ACCOUNT SBATCH_QOS SBATCH_PARTITION SBATCH_TIME SBATCH_MEM_PER_CPU SBATCH_MEM_PER_NODE SBATCH_MEM_PER_GPU SBATCH_GPUS SBATCH_NODES SBATCH_NTASKS SBATCH_CPUS_PER_TASK

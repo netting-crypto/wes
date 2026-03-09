@@ -9,6 +9,8 @@ use_conda_pipeline="${WES_PIPELINE_USE_CONDA:-1}"
 conda_env_prefix="${WES_PIPELINE_CONDA_ENV_PREFIX:-${TMPDIR:-/tmp}/wes-pipeline-conda-${SLURM_JOB_ID:-$$}}"
 conda_channels="${WES_CONDA_CHANNELS:-conda-forge bioconda}"
 conda_packages="${WES_PIPELINE_CONDA_PACKAGES:-bwa samtools bcftools gatk4 htslib fastp fastqc}"
+generate_sample_sheet="${WES_GENERATE_SAMPLE_SHEET_FROM_FASTQ:-0}"
+generated_sample_sheet_path="${WES_GENERATED_SAMPLE_SHEET_PATH:-$project_dir/config/wes/samples.generated.tsv}"
 
 mkdir -p "$output_dir" "$log_dir"
 
@@ -50,6 +52,15 @@ if [[ "$use_conda_pipeline" == "1" ]]; then
   fi
 
   export PATH="$conda_env_prefix/bin:$PATH"
+fi
+
+if [[ "$generate_sample_sheet" == "1" ]]; then
+  echo "Generating sample sheet from FASTQ directory"
+  bash "$project_dir/scripts/generate-wes-sample-sheet.sh" \
+    --fastq-dir "${WES_FASTQ_DIR:?WES_FASTQ_DIR is required when WES_GENERATE_SAMPLE_SHEET_FROM_FASTQ=1}" \
+    --out "$generated_sample_sheet_path"
+  export WES_SAMPLE_SHEET="$generated_sample_sheet_path"
+  echo "WES_SAMPLE_SHEET=$WES_SAMPLE_SHEET"
 fi
 
 echo "Running pipeline command"

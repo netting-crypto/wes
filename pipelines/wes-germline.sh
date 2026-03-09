@@ -9,6 +9,7 @@ Usage:
     --out output/wes/results \
     --ref /path/to/hg38.fa \
     --bed /path/to/targets.bed \
+    [--stage all|preprocess|gvcf|joint] \
     [--known-sites /path/to/known-sites1.vcf.gz] \
     [--known-sites /path/to/known-sites2.vcf.gz] \
     [--family-id FAM001] \
@@ -33,6 +34,7 @@ OUT_DIR=""
 REF_FA=""
 TARGET_BED=""
 declare -a KNOWN_SITES_VCFS=()
+STAGE="all"
 FAMILY_ID=""
 ONLY_SAMPLE=""
 THREADS="${SLURM_CPUS_PER_TASK:-8}"
@@ -48,6 +50,7 @@ while [[ $# -gt 0 ]]; do
     --out) OUT_DIR="$2"; shift 2 ;;
     --ref) REF_FA="$2"; shift 2 ;;
     --bed) TARGET_BED="$2"; shift 2 ;;
+    --stage) STAGE="$2"; shift 2 ;;
     --known-sites) KNOWN_SITES_VCFS+=("$2"); shift 2 ;;
     --family-id) FAMILY_ID="$2"; shift 2 ;;
     --sample) ONLY_SAMPLE="$2"; shift 2 ;;
@@ -70,6 +73,40 @@ require_file() {
 require_cmd() {
   local cmd="$1"
   command -v "$cmd" >/dev/null 2>&1 || { echo "Missing command: $cmd" >&2; exit 2; }
+}
+
+should_run_preprocess() {
+  [[ "$STAGE" == "all" || "$STAGE" == "preprocess" ]]
+}
+
+should_run_gvcf() {
+  [[ "$STAGE" == "all" || "$STAGE" == "gvcf" ]]
+}
+
+should_run_joint() {
+  [[ "$STAGE" == "all" || "$STAGE" == "joint" ]]
+}
+
+infer_sample_bam() {
+  local sample_id="$1"
+  if [[ -f "$OUT_DIR/bam/${sample_id}.bqsr.bam" ]]; then
+    printf '%s\n' "$OUT_DIR/bam/${sample_id}.bqsr.bam"
+  elif [[ -f "$OUT_DIR/bam/${sample_id}.markdup.bam" ]]; then
+    printf '%s\n' "$OUT_DIR/bam/${sample_id}.markdup.bam"
+  elif [[ -f "$OUT_DIR/bam/${sample_id}.sorted.bam" ]]; then
+    printf '%s\n' "$OUT_DIR/bam/${sample_id}.sorted.bam"
+  else
+    return 1
+  fi
+}
+
+infer_sample_gvcf() {
+  local sample_id="$1"
+  if [[ -f "$OUT_DIR/gvcf/${sample_id}.g.vcf.gz" ]]; then
+    printf '%s\n' "$OUT_DIR/gvcf/${sample_id}.g.vcf.gz"
+  else
+    return 1
+  fi
 }
 
 ensure_reference_sidecars() {
@@ -96,6 +133,15 @@ if [[ -z "$SAMPLE_SHEET" || -z "$OUT_DIR" || -z "$REF_FA" || -z "$TARGET_BED" ]]
   usage
   exit 2
 fi
+
+case "$STAGE" in
+  all|preprocess|gvcf|joint)
+    ;;
+  *)
+    echo "Unsupported --stage: $STAGE" >&2
+    exit 2
+    ;;
+esac
 
 require_file "$SAMPLE_SHEET"
 require_file "$REF_FA"
@@ -147,6 +193,7 @@ echo "sample_sheet=$SAMPLE_SHEET"
 echo "out_dir=$OUT_DIR"
 echo "ref=$REF_FA"
 echo "bed=$TARGET_BED"
+echo "stage=$STAGE"
 echo "family_id=${FAMILY_ID:-ALL}"
 echo "sample=${ONLY_SAMPLE:-ALL}"
 echo "aligner=$ALIGNER"
@@ -208,79 +255,99 @@ for sample_id in "${SAMPLE_IDS[@]}"; do
   input_bam="${SAMPLE_BAM[$sample_id]}"
 
   final_bam=""
-  if [[ -n "$input_bam" ]]; then
+  if should_run_preprocess; then
+    if [[ -n "$input_bam" ]]; then
+      require_file "$input_bam"
+      final_bam="$input_bam"
+      echo "Using existing BAM: $final_bam"
+    else
+      require_file "$raw_r1"
+      require_file "$raw_r2"
+
+      work_r1="$raw_r1"
+      work_r2="$raw_r2"
+
+      if [[ "$SKIP_FASTQC" -eq 0 ]]; then
+        fastqc --threads "$THREADS" --outdir "$OUT_DIR/qc" "$work_r1" "$work_r2"
+      fi
+
+      if [[ "$SKIP_FASTP" -eq 0 ]]; then
+        trimmed_r1="$OUT_DIR/trimmed/${sample_id}.R1.fastq.gz"
+        trimmed_r2="$OUT_DIR/trimmed/${sample_id}.R2.fastq.gz"
+        fastp \
+          --thread "$THREADS" \
+          --in1 "$work_r1" \
+          --in2 "$work_r2" \
+          --out1 "$trimmed_r1" \
+          --out2 "$trimmed_r2" \
+          --json "$OUT_DIR/qc/${sample_id}.fastp.json" \
+          --html "$OUT_DIR/qc/${sample_id}.fastp.html"
+        work_r1="$trimmed_r1"
+        work_r2="$trimmed_r2"
+      fi
+
+      sorted_bam="$OUT_DIR/bam/${sample_id}.sorted.bam"
+      rg="@RG\tID:${sample_id}\tSM:${sample_id}\tPL:ILLUMINA\tLB:${family_id:-NA}\tPU:${sample_id}"
+      "$ALIGNER" mem -t "$THREADS" -R "$rg" "$REF_FA" "$work_r1" "$work_r2" \
+        | samtools sort -@ "$THREADS" -o "$sorted_bam" -
+      samtools index -@ "$THREADS" "$sorted_bam"
+
+      markdup_bam="$OUT_DIR/bam/${sample_id}.markdup.bam"
+      gatk MarkDuplicates \
+        -I "$sorted_bam" \
+        -O "$markdup_bam" \
+        -M "$OUT_DIR/bam/${sample_id}.markdup.metrics.txt" \
+        --CREATE_INDEX true \
+        --TMP_DIR "$TMP_DIR"
+
+      if [[ "$SKIP_BQSR" -eq 0 && "${#KNOWN_SITES_VCFS[@]}" -gt 0 ]]; then
+        recal_table="$OUT_DIR/bam/${sample_id}.recal.table"
+        final_bam="$OUT_DIR/bam/${sample_id}.bqsr.bam"
+        gatk BaseRecalibrator \
+          -R "$REF_FA" \
+          -I "$markdup_bam" \
+          "${known_sites_args[@]}" \
+          -L "$TARGET_BED" \
+          -O "$recal_table"
+        gatk ApplyBQSR \
+          -R "$REF_FA" \
+          -I "$markdup_bam" \
+          --bqsr-recal-file "$recal_table" \
+          -O "$final_bam"
+        samtools index -@ "$THREADS" "$final_bam"
+      else
+        final_bam="$markdup_bam"
+      fi
+    fi
+  elif [[ -n "$input_bam" ]]; then
     require_file "$input_bam"
     final_bam="$input_bam"
-    echo "Using existing BAM: $final_bam"
+    echo "Using sample-sheet BAM for later stage: $final_bam"
   else
-    require_file "$raw_r1"
-    require_file "$raw_r2"
-
-    work_r1="$raw_r1"
-    work_r2="$raw_r2"
-
-    if [[ "$SKIP_FASTQC" -eq 0 ]]; then
-      fastqc --threads "$THREADS" --outdir "$OUT_DIR/qc" "$work_r1" "$work_r2"
-    fi
-
-    if [[ "$SKIP_FASTP" -eq 0 ]]; then
-      trimmed_r1="$OUT_DIR/trimmed/${sample_id}.R1.fastq.gz"
-      trimmed_r2="$OUT_DIR/trimmed/${sample_id}.R2.fastq.gz"
-      fastp \
-        --thread "$THREADS" \
-        --in1 "$work_r1" \
-        --in2 "$work_r2" \
-        --out1 "$trimmed_r1" \
-        --out2 "$trimmed_r2" \
-        --json "$OUT_DIR/qc/${sample_id}.fastp.json" \
-        --html "$OUT_DIR/qc/${sample_id}.fastp.html"
-      work_r1="$trimmed_r1"
-      work_r2="$trimmed_r2"
-    fi
-
-    sorted_bam="$OUT_DIR/bam/${sample_id}.sorted.bam"
-    rg="@RG\tID:${sample_id}\tSM:${sample_id}\tPL:ILLUMINA\tLB:${family_id:-NA}\tPU:${sample_id}"
-    "$ALIGNER" mem -t "$THREADS" -R "$rg" "$REF_FA" "$work_r1" "$work_r2" \
-      | samtools sort -@ "$THREADS" -o "$sorted_bam" -
-    samtools index -@ "$THREADS" "$sorted_bam"
-
-    markdup_bam="$OUT_DIR/bam/${sample_id}.markdup.bam"
-    gatk MarkDuplicates \
-      -I "$sorted_bam" \
-      -O "$markdup_bam" \
-      -M "$OUT_DIR/bam/${sample_id}.markdup.metrics.txt" \
-      --CREATE_INDEX true \
-      --TMP_DIR "$TMP_DIR"
-
-    if [[ "$SKIP_BQSR" -eq 0 && "${#KNOWN_SITES_VCFS[@]}" -gt 0 ]]; then
-      recal_table="$OUT_DIR/bam/${sample_id}.recal.table"
-      final_bam="$OUT_DIR/bam/${sample_id}.bqsr.bam"
-      gatk BaseRecalibrator \
-        -R "$REF_FA" \
-        -I "$markdup_bam" \
-        "${known_sites_args[@]}" \
-        -L "$TARGET_BED" \
-        -O "$recal_table"
-      gatk ApplyBQSR \
-        -R "$REF_FA" \
-        -I "$markdup_bam" \
-        --bqsr-recal-file "$recal_table" \
-        -O "$final_bam"
-      samtools index -@ "$THREADS" "$final_bam"
-    else
-      final_bam="$markdup_bam"
-    fi
+    final_bam="$(infer_sample_bam "$sample_id")" || {
+      echo "Could not find an existing BAM for sample $sample_id under $OUT_DIR/bam" >&2
+      exit 2
+    }
+    echo "Using existing staged BAM: $final_bam"
   fi
 
-  sample_gvcf="$OUT_DIR/gvcf/${sample_id}.g.vcf.gz"
-  gatk HaplotypeCaller \
-    -R "$REF_FA" \
-    -I "$final_bam" \
-    -L "$TARGET_BED" \
-    -ERC GVCF \
-    -O "$sample_gvcf"
-  gatk IndexFeatureFile -I "$sample_gvcf"
-  GVCFS+=("$sample_gvcf")
+  sample_gvcf=""
+  if should_run_gvcf; then
+    sample_gvcf="$OUT_DIR/gvcf/${sample_id}.g.vcf.gz"
+    gatk HaplotypeCaller \
+      -R "$REF_FA" \
+      -I "$final_bam" \
+      -L "$TARGET_BED" \
+      -ERC GVCF \
+      -O "$sample_gvcf"
+    gatk IndexFeatureFile -I "$sample_gvcf"
+  else
+    sample_gvcf="$(infer_sample_gvcf "$sample_id" || true)"
+  fi
+
+  if [[ -n "$sample_gvcf" ]]; then
+    GVCFS+=("$sample_gvcf")
+  fi
 
   cat > "$OUT_DIR/gvcf/${sample_id}.meta.txt" <<EOF
 sample_id=$sample_id
@@ -291,6 +358,27 @@ bam=$final_bam
 gvcf=$sample_gvcf
 EOF
 done
+
+if ! should_run_joint; then
+  manifest="$OUT_DIR/run.manifest.txt"
+  {
+    echo "date=$(date -Iseconds)"
+    echo "stage=$STAGE"
+    echo "ref=$REF_FA"
+    echo "bed=$TARGET_BED"
+    echo "samples=${#SAMPLE_IDS[@]}"
+    printf 'sample_ids=%s\n' "$(IFS=,; echo "${SAMPLE_IDS[*]}")"
+    echo "log=$run_log"
+  } > "$manifest"
+  echo "Stage $STAGE finished successfully."
+  echo "Manifest: $manifest"
+  exit 0
+fi
+
+if [[ "${#GVCFS[@]}" -eq 0 ]]; then
+  echo "No gVCFs available for joint calling." >&2
+  exit 2
+fi
 
 combined_gvcf="$OUT_DIR/joint/combined.g.vcf.gz"
 genotyped_vcf="$OUT_DIR/joint/joint.raw.vcf.gz"
@@ -361,6 +449,7 @@ fi
 manifest="$OUT_DIR/run.manifest.txt"
 {
   echo "date=$(date -Iseconds)"
+  echo "stage=$STAGE"
   echo "ref=$REF_FA"
   echo "bed=$TARGET_BED"
   if [[ "${#KNOWN_SITES_VCFS[@]}" -gt 0 ]]; then

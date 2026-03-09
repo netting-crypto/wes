@@ -57,6 +57,9 @@ bash pipelines/wes-germline.sh \
   --out output/wes/results/smoke-test \
   --ref /path/to/Homo_sapiens_assembly38.fasta \
   --bed /path/to/exome_targets.bed \
+  --known-sites /path/to/Homo_sapiens_assembly38.dbsnp138.vcf \
+  --known-sites /path/to/Homo_sapiens_assembly38.known_indels.vcf.gz \
+  --known-sites /path/to/Mills_and_1000G_gold_standard.indels.hg38.vcf.gz \
   --sample AMD001 \
   --threads 16 \
   --skip-fastqc
@@ -107,10 +110,12 @@ Use `hg38 / GRCh38` unless you already have a legacy `hg19` ecosystem you must s
 - FASTA index `.fai`
 - FASTA sequence dictionary `.dict`
 - Exome target BED matching your capture kit
-- Known-sites VCF for first-pass BQSR
+- One or more known-sites VCFs for first-pass BQSR
 - Optional VEP cache for annotation
 
 For first smoke tests, if known-sites are not ready, you can temporarily add `--skip-bqsr`.
+When they are ready, pass all available Broad-style known-sites files with repeated
+`--known-sites` arguments.
 
 ## Reference and best-practice notes
 

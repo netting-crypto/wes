@@ -14,6 +14,29 @@ set -a
 source "$ENV_FILE"
 set +a
 
+declare -a KNOWN_SITES_TO_CHECK=()
+for candidate in \
+  "${WES_KNOWN_SITES_VCF:-}" \
+  "${WES_DBSNP_PATH:-}" \
+  "${WES_KNOWN_INDELS_PATH:-}" \
+  "${WES_MILLS_PATH:-}" \
+  "${WES_KNOWN_SITES_1:-}" \
+  "${WES_KNOWN_SITES_2:-}" \
+  "${WES_KNOWN_SITES_3:-}"
+do
+  [[ -n "$candidate" ]] || continue
+  skip_candidate=0
+  for seen in "${KNOWN_SITES_TO_CHECK[@]}"; do
+    if [[ "$seen" == "$candidate" ]]; then
+      skip_candidate=1
+      break
+    fi
+  done
+  if [[ "$skip_candidate" -eq 0 ]]; then
+    KNOWN_SITES_TO_CHECK+=("$candidate")
+  fi
+done
+
 print_ok() {
   printf '[OK] %s\n' "$1"
 }
@@ -89,10 +112,14 @@ echo
 echo "== Key files =="
 check_file "$WES_REF_PATH" "reference"
 check_file "$WES_BED_PATH" "target bed"
-if [[ -n "${WES_KNOWN_SITES_VCF:-}" ]]; then
-  check_file "$WES_KNOWN_SITES_VCF" "known sites VCF"
+if [[ "${#KNOWN_SITES_TO_CHECK[@]}" -gt 0 ]]; then
+  known_sites_idx=0
+  for known_sites_vcf in "${KNOWN_SITES_TO_CHECK[@]}"; do
+    known_sites_idx=$((known_sites_idx + 1))
+    check_file "$known_sites_vcf" "known sites VCF $known_sites_idx"
+  done
 else
-  print_warn "WES_KNOWN_SITES_VCF not set; first smoke test can still run with --skip-bqsr"
+  print_warn "No known-sites VCF is set; first smoke test can still run with --skip-bqsr"
 fi
 check_dir "$WES_FASTQ_DIR" "FASTQ input"
 check_file "$WES_SAMPLE_SHEET" "sample sheet"
@@ -114,6 +141,24 @@ else
 fi
 
 echo
+echo "== Known-sites sidecar files =="
+if [[ "${#KNOWN_SITES_TO_CHECK[@]}" -gt 0 ]]; then
+  known_sites_idx=0
+  for known_sites_vcf in "${KNOWN_SITES_TO_CHECK[@]}"; do
+    known_sites_idx=$((known_sites_idx + 1))
+    if [[ -f "${known_sites_vcf}.tbi" ]]; then
+      print_ok "known sites VCF $known_sites_idx index exists: ${known_sites_vcf}.tbi"
+    elif [[ -f "${known_sites_vcf}.idx" ]]; then
+      print_ok "known sites VCF $known_sites_idx index exists: ${known_sites_vcf}.idx"
+    else
+      print_fail "known sites VCF $known_sites_idx index missing near: $known_sites_vcf"
+    fi
+  done
+else
+  print_warn "No known-sites index checks were run"
+fi
+
+echo
 echo "== FASTQ preview =="
 find "$WES_FASTQ_DIR" -maxdepth 2 -type f \( -name "*.fastq.gz" -o -name "*.fq.gz" \) | sort | head -n 20 || true
 
@@ -127,5 +172,5 @@ bash pipelines/wes-germline.sh \\
   --bed "$WES_BED_PATH" \\
   --sample "<pick-one-sample-id>" \\
   --threads "${SLURM_CPUS_PER_TASK:-8}" \\
-  $( [[ -n "${WES_KNOWN_SITES_VCF:-}" ]] && printf -- '--known-sites "%s" \\\n  ' "$WES_KNOWN_SITES_VCF" )--skip-fastqc
+  $( for known_sites_vcf in "${KNOWN_SITES_TO_CHECK[@]}"; do printf -- '--known-sites "%s" \\\n  ' "$known_sites_vcf"; done )--skip-fastqc
 EOF

@@ -9,7 +9,8 @@ Usage:
     --out output/wes/results \
     --ref /path/to/hg38.fa \
     --bed /path/to/targets.bed \
-    [--known-sites /path/to/known-sites.vcf.gz] \
+    [--known-sites /path/to/known-sites1.vcf.gz] \
+    [--known-sites /path/to/known-sites2.vcf.gz] \
     [--family-id FAM001] \
     [--sample SAMPLE001] \
     [--threads 16] \
@@ -31,7 +32,7 @@ SAMPLE_SHEET=""
 OUT_DIR=""
 REF_FA=""
 TARGET_BED=""
-KNOWN_SITES_VCF=""
+declare -a KNOWN_SITES_VCFS=()
 FAMILY_ID=""
 ONLY_SAMPLE=""
 THREADS="${SLURM_CPUS_PER_TASK:-8}"
@@ -47,7 +48,7 @@ while [[ $# -gt 0 ]]; do
     --out) OUT_DIR="$2"; shift 2 ;;
     --ref) REF_FA="$2"; shift 2 ;;
     --bed) TARGET_BED="$2"; shift 2 ;;
-    --known-sites) KNOWN_SITES_VCF="$2"; shift 2 ;;
+    --known-sites) KNOWN_SITES_VCFS+=("$2"); shift 2 ;;
     --family-id) FAMILY_ID="$2"; shift 2 ;;
     --sample) ONLY_SAMPLE="$2"; shift 2 ;;
     --threads) THREADS="$2"; shift 2 ;;
@@ -79,7 +80,9 @@ fi
 require_file "$SAMPLE_SHEET"
 require_file "$REF_FA"
 require_file "$TARGET_BED"
-[[ -z "$KNOWN_SITES_VCF" ]] || require_file "$KNOWN_SITES_VCF"
+for known_sites_vcf in "${KNOWN_SITES_VCFS[@]}"; do
+  require_file "$known_sites_vcf"
+done
 
 require_cmd bash
 require_cmd samtools
@@ -117,6 +120,13 @@ if [[ ! -f "${REF_FA%.*}.dict" && ! -f "${REF_FA}.dict" ]]; then
   exit 2
 fi
 
+for known_sites_vcf in "${KNOWN_SITES_VCFS[@]}"; do
+  if [[ ! -f "${known_sites_vcf}.tbi" && ! -f "${known_sites_vcf}.idx" ]]; then
+    echo "Known-sites index not found near: $known_sites_vcf" >&2
+    exit 2
+  fi
+done
+
 run_log="$OUT_DIR/logs/run-$(date +%Y%m%d-%H%M%S).log"
 exec > >(tee -a "$run_log") 2>&1
 
@@ -130,7 +140,11 @@ echo "sample=${ONLY_SAMPLE:-ALL}"
 echo "aligner=$ALIGNER"
 echo "threads=$THREADS"
 echo "tmp_dir=$TMP_DIR"
-echo "known_sites=${KNOWN_SITES_VCF:-NONE}"
+if [[ "${#KNOWN_SITES_VCFS[@]}" -gt 0 ]]; then
+  printf 'known_sites=%s\n' "$(IFS=,; echo "${KNOWN_SITES_VCFS[*]}")"
+else
+  echo "known_sites=NONE"
+fi
 
 declare -a SAMPLE_IDS=()
 declare -A SAMPLE_FAMILY=()
@@ -166,6 +180,10 @@ if [[ "${#SAMPLE_IDS[@]}" -eq 0 ]]; then
 fi
 
 declare -a GVCFS=()
+known_sites_args=()
+for known_sites_vcf in "${KNOWN_SITES_VCFS[@]}"; do
+  known_sites_args+=(--known-sites "$known_sites_vcf")
+done
 
 for sample_id in "${SAMPLE_IDS[@]}"; do
   echo
@@ -222,13 +240,13 @@ for sample_id in "${SAMPLE_IDS[@]}"; do
       --CREATE_INDEX true \
       --TMP_DIR "$TMP_DIR"
 
-    if [[ "$SKIP_BQSR" -eq 0 && -n "$KNOWN_SITES_VCF" ]]; then
+    if [[ "$SKIP_BQSR" -eq 0 && "${#KNOWN_SITES_VCFS[@]}" -gt 0 ]]; then
       recal_table="$OUT_DIR/bam/${sample_id}.recal.table"
       final_bam="$OUT_DIR/bam/${sample_id}.bqsr.bam"
       gatk BaseRecalibrator \
         -R "$REF_FA" \
         -I "$markdup_bam" \
-        --known-sites "$KNOWN_SITES_VCF" \
+        "${known_sites_args[@]}" \
         -L "$TARGET_BED" \
         -O "$recal_table"
       gatk ApplyBQSR \
@@ -333,7 +351,11 @@ manifest="$OUT_DIR/run.manifest.txt"
   echo "date=$(date -Iseconds)"
   echo "ref=$REF_FA"
   echo "bed=$TARGET_BED"
-  echo "known_sites=${KNOWN_SITES_VCF:-NONE}"
+  if [[ "${#KNOWN_SITES_VCFS[@]}" -gt 0 ]]; then
+    printf 'known_sites=%s\n' "$(IFS=,; echo "${KNOWN_SITES_VCFS[*]}")"
+  else
+    echo "known_sites=NONE"
+  fi
   echo "samples=${#SAMPLE_IDS[@]}"
   printf 'sample_ids=%s\n' "$(IFS=,; echo "${SAMPLE_IDS[*]}")"
   echo "joint_vcf=$merged_vcf"

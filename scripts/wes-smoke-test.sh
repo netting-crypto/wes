@@ -13,6 +13,29 @@ conda_env_prefix="${WES_CONDA_ENV_PREFIX:-${TMPDIR:-/tmp}/wes-conda-smoke-${SLUR
 conda_channels="${WES_CONDA_CHANNELS:-conda-forge bioconda}"
 conda_packages="${WES_CONDA_PACKAGES:-bwa bcftools gatk4 fastqc}"
 
+declare -a KNOWN_SITES_TO_CHECK=()
+for candidate in \
+  "${WES_KNOWN_SITES_VCF:-}" \
+  "${WES_DBSNP_PATH:-}" \
+  "${WES_KNOWN_INDELS_PATH:-}" \
+  "${WES_MILLS_PATH:-}" \
+  "${WES_KNOWN_SITES_1:-}" \
+  "${WES_KNOWN_SITES_2:-}" \
+  "${WES_KNOWN_SITES_3:-}"
+do
+  [[ -n "$candidate" ]] || continue
+  skip_candidate=0
+  for seen in "${KNOWN_SITES_TO_CHECK[@]}"; do
+    if [[ "$seen" == "$candidate" ]]; then
+      skip_candidate=1
+      break
+    fi
+  done
+  if [[ "$skip_candidate" -eq 0 ]]; then
+    KNOWN_SITES_TO_CHECK+=("$candidate")
+  fi
+done
+
 mkdir -p "$smoke_dir" "$log_dir"
 
 log_file="$log_dir/smoke-test.log"
@@ -136,7 +159,7 @@ fi
 
 echo
 echo "== Resource probe =="
-for item in WES_REF_PATH WES_BED_PATH WES_KNOWN_SITES_VCF VEP_CACHE_DIR; do
+for item in WES_REF_PATH WES_BED_PATH VEP_CACHE_DIR; do
   value="${!item:-}"
   if [[ -z "$value" ]]; then
     echo "[UNSET] $item"
@@ -146,6 +169,19 @@ for item in WES_REF_PATH WES_BED_PATH WES_KNOWN_SITES_VCF VEP_CACHE_DIR; do
     echo "[MISSING] $item=$value"
   fi
 done
+if [[ "${#KNOWN_SITES_TO_CHECK[@]}" -gt 0 ]]; then
+  known_sites_idx=0
+  for known_sites_vcf in "${KNOWN_SITES_TO_CHECK[@]}"; do
+    known_sites_idx=$((known_sites_idx + 1))
+    if [[ -e "$known_sites_vcf" ]]; then
+      echo "[FOUND] WES_KNOWN_SITES_$known_sites_idx=$known_sites_vcf"
+    else
+      echo "[MISSING] WES_KNOWN_SITES_$known_sites_idx=$known_sites_vcf"
+    fi
+  done
+else
+  echo "[UNSET] WES_KNOWN_SITES_*"
+fi
 
 summary="$output_dir/smoke-summary.txt"
 {
@@ -157,6 +193,7 @@ summary="$output_dir/smoke-summary.txt"
   echo "conda_env_prefix=$conda_env_prefix"
   echo "test_r1=${WES_TEST_R1:-}"
   echo "test_r2=${WES_TEST_R2:-}"
+  printf 'known_sites=%s\n' "$(IFS=,; echo "${KNOWN_SITES_TO_CHECK[*]:-}")"
 } > "$summary"
 
 if [[ -d "$conda_env_prefix" ]]; then

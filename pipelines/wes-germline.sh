@@ -72,6 +72,26 @@ require_cmd() {
   command -v "$cmd" >/dev/null 2>&1 || { echo "Missing command: $cmd" >&2; exit 2; }
 }
 
+ensure_reference_sidecars() {
+  local ref_fa="$1"
+  local dict_path="${ref_fa%.*}.dict"
+
+  if [[ ! -f "${ref_fa}.fai" ]]; then
+    echo "Building FASTA index: ${ref_fa}.fai"
+    samtools faidx "$ref_fa"
+  fi
+
+  if [[ ! -f "$dict_path" && ! -f "${ref_fa}.dict" ]]; then
+    echo "Building sequence dictionary: $dict_path"
+    gatk CreateSequenceDictionary -R "$ref_fa" -O "$dict_path"
+  fi
+
+  if [[ ! -f "${ref_fa}.amb" || ! -f "${ref_fa}.ann" || ! -f "${ref_fa}.bwt" || ! -f "${ref_fa}.pac" || ! -f "${ref_fa}.sa" ]]; then
+    echo "Building BWA index for reference"
+    bwa index "$ref_fa"
+  fi
+}
+
 if [[ -z "$SAMPLE_SHEET" || -z "$OUT_DIR" || -z "$REF_FA" || -z "$TARGET_BED" ]]; then
   usage
   exit 2
@@ -110,15 +130,7 @@ if [[ -z "$TMP_DIR" ]]; then
 fi
 mkdir -p "$TMP_DIR"
 
-if [[ ! -f "${REF_FA}.fai" ]]; then
-  echo "Reference index not found: ${REF_FA}.fai" >&2
-  exit 2
-fi
-
-if [[ ! -f "${REF_FA%.*}.dict" && ! -f "${REF_FA}.dict" ]]; then
-  echo "Reference dict not found near: $REF_FA" >&2
-  exit 2
-fi
+ensure_reference_sidecars "$REF_FA"
 
 for known_sites_vcf in "${KNOWN_SITES_VCFS[@]}"; do
   if [[ ! -f "${known_sites_vcf}.tbi" && ! -f "${known_sites_vcf}.idx" ]]; then

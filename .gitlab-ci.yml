@@ -32,7 +32,7 @@ variables:
   WES_STAGE_OUT_DIR: "$OUTPUT_DIR/$WES_RESULTS_SUBDIR/preprocess-batch"
   WES_SKIP_FASTQC: "1"
   WES_SKIP_BQSR_PREPROCESS: "1"
-  WES_BATCH_MAX_CONCURRENT: "24"
+  WES_BATCH_MAX_CONCURRENT: "12"
   WES_PIPELINE_STAGE: "preprocess"
   WES_PIPELINE_EXTRA_ARGS: "--skip-bqsr --skip-fastqc"
   WES_PIPELINE_CMD: "bash pipelines/wes-germline.sh --sample-sheet \"$WES_SAMPLE_SHEET\" --out \"$WES_STAGE_OUT_DIR\" --ref \"$WES_REF_PATH\" --bed \"$WES_BED_PATH\" --stage \"$WES_PIPELINE_STAGE\" --threads \"$SLURM_CPUS_PER_TASK\" ${WES_PIPELINE_EXTRA_ARGS}"

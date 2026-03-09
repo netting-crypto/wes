@@ -5,7 +5,7 @@ variables:
   OUTPUT_DIR: "$CI_PROJECT_DIR/output/wes"
   WES_RESULTS_SUBDIR: "results"
   WES_LOGS_SUBDIR: "logs"
-  WES_MODE: "prepare-resources"
+  WES_MODE: "find-bed"
   WES_FASTQ_DIR: "/home/zhangmeigroup/luoxin23/upload20251105/fastq"
   WES_TEST_R1: "/home/zhangmeigroup/luoxin23/upload20251105/fastq/2103022S1OWC_S12_R1_001.fastq.gz"
   WES_TEST_R2: "/home/zhangmeigroup/luoxin23/upload20251105/fastq/2103022S1OWC_S12_R2_001.fastq.gz"

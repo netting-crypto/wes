@@ -23,6 +23,9 @@ case "$wes_mode" in
   smoke)
     bash "$project_dir/scripts/wes-smoke-test.sh"
     ;;
+  find-bed)
+    bash "$project_dir/scripts/wes-find-bed.sh"
+    ;;
   pipeline)
     bash -lc "${WES_PIPELINE_CMD:?WES_PIPELINE_CMD is required when WES_MODE=pipeline}"
     ;;

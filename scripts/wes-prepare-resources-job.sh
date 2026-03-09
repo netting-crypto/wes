@@ -74,6 +74,12 @@ prepare_args=(
 if [[ -n "${BED_URL:-}" ]]; then
   prepare_args+=(--bed-url "$BED_URL")
 fi
+if [[ -n "${GENCODE_GTF_URL:-}" ]]; then
+  prepare_args+=(--gencode-gtf-url "$GENCODE_GTF_URL")
+fi
+if [[ -n "${WES_BED_PADDING_BP:-}" ]]; then
+  prepare_args+=(--bed-padding-bp "$WES_BED_PADDING_BP")
+fi
 if [[ "$allow_missing_known_sites" == "1" ]]; then
   prepare_args+=(--allow-missing-known-sites)
 fi

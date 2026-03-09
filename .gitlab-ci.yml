@@ -5,7 +5,7 @@ variables:
   OUTPUT_DIR: "$CI_PROJECT_DIR/output/wes"
   WES_RESULTS_SUBDIR: "results"
   WES_LOGS_SUBDIR: "logs"
-  WES_MODE: "find-bed"
+  WES_MODE: "prepare-resources"
   WES_FASTQ_DIR: "/home/zhangmeigroup/luoxin23/upload20251105/fastq"
   WES_TEST_R1: "/home/zhangmeigroup/luoxin23/upload20251105/fastq/2103022S1OWC_S12_R1_001.fastq.gz"
   WES_TEST_R2: "/home/zhangmeigroup/luoxin23/upload20251105/fastq/2103022S1OWC_S12_R2_001.fastq.gz"
@@ -20,6 +20,8 @@ variables:
   DBSNP_URL: "https://storage.googleapis.com/genomics-public-data/resources/broad/hg38/v0/Homo_sapiens_assembly38.dbsnp138.vcf"
   KNOWN_INDELS_URL: "https://storage.googleapis.com/genomics-public-data/resources/broad/hg38/v0/Homo_sapiens_assembly38.known_indels.vcf.gz"
   MILLS_URL: "https://storage.googleapis.com/genomics-public-data/resources/broad/hg38/v0/Mills_and_1000G_gold_standard.indels.hg38.vcf.gz"
+  GENCODE_GTF_URL: "https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_48/gencode.v48.basic.annotation.gtf.gz"
+  WES_BED_PADDING_BP: "50"
 
   SLURM_JOB_NAME: "wes-pipeline"
   SLURM_PARTITION: "CPU-64C256GB"

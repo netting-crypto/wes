@@ -11,6 +11,8 @@ Usage:
     [--known-indels-url URL] \
     [--mills-url URL] \
     [--bed-url URL] \
+    [--gencode-gtf-url URL] \
+    [--bed-padding-bp 50] \
     [--vep-cache-url URL] \
     [--skip-download] \
     [--allow-missing-known-sites] \
@@ -34,6 +36,8 @@ DBSNP_URL=""
 KNOWN_INDELS_URL=""
 MILLS_URL=""
 BED_URL=""
+GENCODE_GTF_URL=""
+BED_PADDING_BP=50
 VEP_CACHE_URL=""
 SKIP_DOWNLOAD=0
 SKIP_VEP=0
@@ -47,6 +51,8 @@ while [[ $# -gt 0 ]]; do
     --known-indels-url) KNOWN_INDELS_URL="$2"; shift 2 ;;
     --mills-url) MILLS_URL="$2"; shift 2 ;;
     --bed-url) BED_URL="$2"; shift 2 ;;
+    --gencode-gtf-url) GENCODE_GTF_URL="$2"; shift 2 ;;
+    --bed-padding-bp) BED_PADDING_BP="$2"; shift 2 ;;
     --vep-cache-url) VEP_CACHE_URL="$2"; shift 2 ;;
     --skip-download) SKIP_DOWNLOAD=1; shift ;;
     --allow-missing-known-sites) ALLOW_MISSING_KNOWN_SITES=1; shift ;;
@@ -121,6 +127,71 @@ index_vcf_if_needed() {
   fi
 }
 
+build_bed_from_gencode() {
+  local gtf_gz="$1"
+  local out_bed="$2"
+  local padding_bp="$3"
+  local tmp_bed
+  local sorted_bed
+
+  tmp_bed="$(mktemp)"
+  sorted_bed="$(mktemp)"
+
+  echo "Generating BED from GENCODE GTF: $gtf_gz"
+  gzip -dc "$gtf_gz" \
+    | awk -F'\t' -v pad="$padding_bp" '
+      BEGIN { OFS="\t" }
+      $0 ~ /^#/ { next }
+      $3 != "exon" { next }
+      {
+        attrs = $9
+        is_protein_coding = 0
+        if (attrs ~ /gene_type "protein_coding"/ || attrs ~ /gene_biotype "protein_coding"/ || attrs ~ /transcript_type "protein_coding"/ || attrs ~ /transcript_biotype "protein_coding"/) {
+          is_protein_coding = 1
+        }
+        if (!is_protein_coding) {
+          next
+        }
+        start = $4 - 1 - pad
+        if (start < 0) {
+          start = 0
+        }
+        end = $5 + pad
+        print $1, start, end
+      }
+    ' > "$tmp_bed"
+
+  sort -k1,1 -k2,2n -k3,3n "$tmp_bed" > "$sorted_bed"
+  awk '
+    BEGIN { OFS="\t" }
+    NR == 1 {
+      chr = $1
+      start = $2
+      end = $3
+      next
+    }
+    {
+      if ($1 == chr && $2 <= end) {
+        if ($3 > end) {
+          end = $3
+        }
+      } else {
+        print chr, start, end
+        chr = $1
+        start = $2
+        end = $3
+      }
+    }
+    END {
+      if (NR > 0) {
+        print chr, start, end
+      }
+    }
+  ' "$sorted_bed" > "$out_bed"
+
+  rm -f "$tmp_bed" "$sorted_bed"
+}
+
 need_cmd bash
 need_cmd mkdir
 need_cmd curl
@@ -136,6 +207,7 @@ DBSNP_VCF="$BASE_DIR/known-sites/Homo_sapiens_assembly38.dbsnp138.vcf"
 KNOWN_INDELS_VCF="$BASE_DIR/known-sites/Homo_sapiens_assembly38.known_indels.vcf.gz"
 MILLS_VCF="$BASE_DIR/known-sites/Mills_and_1000G_gold_standard.indels.hg38.vcf.gz"
 TARGET_BED="$BASE_DIR/targets/exome_targets.bed"
+GENCODE_GTF_GZ="$BASE_DIR/targets/gencode.basic.annotation.gtf.gz"
 VEP_ARCHIVE="$BASE_DIR/vep/homo_sapiens_vep_cache.tar.gz"
 
 log_file="$BASE_DIR/logs/prepare-$(date +%Y%m%d-%H%M%S).log"
@@ -153,9 +225,16 @@ if [[ "$SKIP_DOWNLOAD" -eq 0 ]]; then
   download_to "$KNOWN_INDELS_URL" "$KNOWN_INDELS_VCF" "$optional_known_sites_required"
   download_to "$MILLS_URL" "$MILLS_VCF" "$optional_known_sites_required"
   download_to "$BED_URL" "$TARGET_BED"
+  if [[ ! -f "$TARGET_BED" && -n "$GENCODE_GTF_URL" ]]; then
+    download_to "$GENCODE_GTF_URL" "$GENCODE_GTF_GZ" 1
+  fi
   if [[ "$SKIP_VEP" -eq 0 ]]; then
     download_to "$VEP_CACHE_URL" "$VEP_ARCHIVE"
   fi
+fi
+
+if [[ ! -f "$TARGET_BED" && -f "$GENCODE_GTF_GZ" ]]; then
+  build_bed_from_gencode "$GENCODE_GTF_GZ" "$TARGET_BED" "$BED_PADDING_BP"
 fi
 
 if [[ -f "$REF_FA" ]]; then

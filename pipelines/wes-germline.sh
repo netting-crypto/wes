@@ -109,6 +109,16 @@ infer_sample_gvcf() {
   fi
 }
 
+bam_has_index() {
+  local bam_path="$1"
+  [[ -f "${bam_path}.bai" || -f "${bam_path%.*}.bai" ]]
+}
+
+feature_has_index() {
+  local feature_path="$1"
+  [[ -f "${feature_path}.idx" || -f "${feature_path}.tbi" ]]
+}
+
 ensure_reference_sidecars() {
   local ref_fa="$1"
   local dict_path="${ref_fa%.*}.dict"
@@ -253,6 +263,11 @@ for sample_id in "${SAMPLE_IDS[@]}"; do
   raw_r1="${SAMPLE_R1[$sample_id]}"
   raw_r2="${SAMPLE_R2[$sample_id]}"
   input_bam="${SAMPLE_BAM[$sample_id]}"
+  sorted_bam="$OUT_DIR/bam/${sample_id}.sorted.bam"
+  markdup_bam="$OUT_DIR/bam/${sample_id}.markdup.bam"
+  recal_table="$OUT_DIR/bam/${sample_id}.recal.table"
+  bqsr_bam="$OUT_DIR/bam/${sample_id}.bqsr.bam"
+  sample_gvcf="$OUT_DIR/gvcf/${sample_id}.g.vcf.gz"
 
   final_bam=""
   if should_run_preprocess; then
@@ -274,47 +289,60 @@ for sample_id in "${SAMPLE_IDS[@]}"; do
       if [[ "$SKIP_FASTP" -eq 0 ]]; then
         trimmed_r1="$OUT_DIR/trimmed/${sample_id}.R1.fastq.gz"
         trimmed_r2="$OUT_DIR/trimmed/${sample_id}.R2.fastq.gz"
-        fastp \
-          --thread "$THREADS" \
-          --in1 "$work_r1" \
-          --in2 "$work_r2" \
-          --out1 "$trimmed_r1" \
-          --out2 "$trimmed_r2" \
-          --json "$OUT_DIR/qc/${sample_id}.fastp.json" \
-          --html "$OUT_DIR/qc/${sample_id}.fastp.html"
+        if [[ -f "$trimmed_r1" && -f "$trimmed_r2" ]]; then
+          echo "Reusing existing trimmed FASTQ files."
+        else
+          fastp \
+            --thread "$THREADS" \
+            --in1 "$work_r1" \
+            --in2 "$work_r2" \
+            --out1 "$trimmed_r1" \
+            --out2 "$trimmed_r2" \
+            --json "$OUT_DIR/qc/${sample_id}.fastp.json" \
+            --html "$OUT_DIR/qc/${sample_id}.fastp.html"
+        fi
         work_r1="$trimmed_r1"
         work_r2="$trimmed_r2"
       fi
 
-      sorted_bam="$OUT_DIR/bam/${sample_id}.sorted.bam"
-      rg="@RG\tID:${sample_id}\tSM:${sample_id}\tPL:ILLUMINA\tLB:${family_id:-NA}\tPU:${sample_id}"
-      "$ALIGNER" mem -t "$THREADS" -R "$rg" "$REF_FA" "$work_r1" "$work_r2" \
-        | samtools sort -@ "$THREADS" -o "$sorted_bam" -
-      samtools index -@ "$THREADS" "$sorted_bam"
+      if [[ -f "$sorted_bam" ]] && bam_has_index "$sorted_bam"; then
+        echo "Reusing existing sorted BAM: $sorted_bam"
+      else
+        rg="@RG\tID:${sample_id}\tSM:${sample_id}\tPL:ILLUMINA\tLB:${family_id:-NA}\tPU:${sample_id}"
+        "$ALIGNER" mem -t "$THREADS" -R "$rg" "$REF_FA" "$work_r1" "$work_r2" \
+          | samtools sort -@ "$THREADS" -o "$sorted_bam" -
+        samtools index -@ "$THREADS" "$sorted_bam"
+      fi
 
-      markdup_bam="$OUT_DIR/bam/${sample_id}.markdup.bam"
-      gatk MarkDuplicates \
-        -I "$sorted_bam" \
-        -O "$markdup_bam" \
-        -M "$OUT_DIR/bam/${sample_id}.markdup.metrics.txt" \
-        --CREATE_INDEX true \
-        --TMP_DIR "$TMP_DIR"
+      if [[ -f "$markdup_bam" ]] && bam_has_index "$markdup_bam"; then
+        echo "Reusing existing MarkDuplicates BAM: $markdup_bam"
+      else
+        gatk MarkDuplicates \
+          -I "$sorted_bam" \
+          -O "$markdup_bam" \
+          -M "$OUT_DIR/bam/${sample_id}.markdup.metrics.txt" \
+          --CREATE_INDEX true \
+          --TMP_DIR "$TMP_DIR"
+      fi
 
       if [[ "$SKIP_BQSR" -eq 0 && "${#KNOWN_SITES_VCFS[@]}" -gt 0 ]]; then
-        recal_table="$OUT_DIR/bam/${sample_id}.recal.table"
-        final_bam="$OUT_DIR/bam/${sample_id}.bqsr.bam"
-        gatk BaseRecalibrator \
-          -R "$REF_FA" \
-          -I "$markdup_bam" \
-          "${known_sites_args[@]}" \
-          -L "$TARGET_BED" \
-          -O "$recal_table"
-        gatk ApplyBQSR \
-          -R "$REF_FA" \
-          -I "$markdup_bam" \
-          --bqsr-recal-file "$recal_table" \
-          -O "$final_bam"
-        samtools index -@ "$THREADS" "$final_bam"
+        final_bam="$bqsr_bam"
+        if [[ -f "$final_bam" ]] && bam_has_index "$final_bam"; then
+          echo "Reusing existing BQSR BAM: $final_bam"
+        else
+          gatk BaseRecalibrator \
+            -R "$REF_FA" \
+            -I "$markdup_bam" \
+            "${known_sites_args[@]}" \
+            -L "$TARGET_BED" \
+            -O "$recal_table"
+          gatk ApplyBQSR \
+            -R "$REF_FA" \
+            -I "$markdup_bam" \
+            --bqsr-recal-file "$recal_table" \
+            -O "$final_bam"
+          samtools index -@ "$THREADS" "$final_bam"
+        fi
       else
         final_bam="$markdup_bam"
       fi
@@ -331,16 +359,22 @@ for sample_id in "${SAMPLE_IDS[@]}"; do
     echo "Using existing staged BAM: $final_bam"
   fi
 
-  sample_gvcf=""
   if should_run_gvcf; then
-    sample_gvcf="$OUT_DIR/gvcf/${sample_id}.g.vcf.gz"
-    gatk HaplotypeCaller \
-      -R "$REF_FA" \
-      -I "$final_bam" \
-      -L "$TARGET_BED" \
-      -ERC GVCF \
-      -O "$sample_gvcf"
-    gatk IndexFeatureFile -F "$sample_gvcf"
+    if [[ -f "$sample_gvcf" ]] && feature_has_index "$sample_gvcf"; then
+      echo "Reusing existing gVCF: $sample_gvcf"
+    else
+      if [[ -f "$sample_gvcf" ]]; then
+        echo "gVCF exists without index; rebuilding index: $sample_gvcf"
+      else
+        gatk HaplotypeCaller \
+          -R "$REF_FA" \
+          -I "$final_bam" \
+          -L "$TARGET_BED" \
+          -ERC GVCF \
+          -O "$sample_gvcf"
+      fi
+      gatk IndexFeatureFile -F "$sample_gvcf"
+    fi
   else
     sample_gvcf="$(infer_sample_gvcf "$sample_id" || true)"
   fi

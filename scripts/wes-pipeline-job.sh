@@ -7,10 +7,12 @@ logs_subdir="${WES_LOGS_SUBDIR:-logs}"
 log_dir="$output_dir/$logs_subdir"
 use_conda_pipeline="${WES_PIPELINE_USE_CONDA:-1}"
 conda_env_prefix="${WES_PIPELINE_CONDA_ENV_PREFIX:-${TMPDIR:-/tmp}/wes-pipeline-conda-${SLURM_JOB_ID:-$$}}"
+shared_env_prefix="${WES_PIPELINE_SHARED_CONDA_ENV_PREFIX:-$output_dir/shared-envs/pipeline-conda}"
 conda_channels="${WES_CONDA_CHANNELS:-conda-forge bioconda}"
 conda_packages="${WES_PIPELINE_CONDA_PACKAGES:-bwa samtools bcftools gatk4 htslib fastp fastqc}"
 generate_sample_sheet="${WES_GENERATE_SAMPLE_SHEET_FROM_FASTQ:-0}"
 generated_sample_sheet_path="${WES_GENERATED_SAMPLE_SHEET_PATH:-$project_dir/config/wes/samples.generated.tsv}"
+reuse_shared_conda="${WES_PIPELINE_REUSE_SHARED_CONDA:-1}"
 
 mkdir -p "$output_dir" "$log_dir"
 
@@ -30,25 +32,60 @@ if [[ "$use_conda_pipeline" == "1" ]]; then
     exit 2
   fi
 
-  rm -rf "$conda_env_prefix"
   channel_args=()
   for channel in $conda_channels; do
     channel_args+=(-c "$channel")
   done
 
-  echo "Creating temporary pipeline conda env: $conda_env_prefix"
   echo "conda_channels=$conda_channels"
   echo "conda_packages=$conda_packages"
 
-  set +e
-  conda create -y -p "$conda_env_prefix" "${channel_args[@]}" $conda_packages >"$log_dir/pipeline-conda.stdout.log" 2>"$log_dir/pipeline-conda.stderr.log"
-  conda_status=$?
-  set -e
-  echo "conda_create_status=$conda_status"
-  if [[ $conda_status -ne 0 ]]; then
-    echo "[FAIL] pipeline conda create failed"
-    tail -n 100 "$log_dir/pipeline-conda.stderr.log" || true
-    exit "$conda_status"
+  if [[ "$reuse_shared_conda" == "1" ]]; then
+    mkdir -p "$(dirname "$shared_env_prefix")"
+    lock_dir="${shared_env_prefix}.lock"
+    conda_env_prefix="$shared_env_prefix"
+
+    if [[ ! -x "$conda_env_prefix/bin/gatk" ]]; then
+      if mkdir "$lock_dir" 2>/dev/null; then
+        echo "Creating shared pipeline conda env: $conda_env_prefix"
+        cleanup_lock() {
+          rmdir "$lock_dir" 2>/dev/null || true
+        }
+        trap cleanup_lock EXIT
+        set +e
+        conda create -y -p "$conda_env_prefix" "${channel_args[@]}" $conda_packages >"$log_dir/pipeline-conda.stdout.log" 2>"$log_dir/pipeline-conda.stderr.log"
+        conda_status=$?
+        set -e
+        echo "conda_create_status=$conda_status"
+        if [[ $conda_status -ne 0 ]]; then
+          echo "[FAIL] pipeline conda create failed"
+          tail -n 100 "$log_dir/pipeline-conda.stderr.log" || true
+          exit "$conda_status"
+        fi
+        cleanup_lock
+        trap - EXIT
+      else
+        echo "Waiting for shared pipeline conda env lock: $lock_dir"
+        while [[ -d "$lock_dir" ]]; do
+          sleep 15
+        done
+      fi
+    else
+      echo "Reusing shared pipeline conda env: $conda_env_prefix"
+    fi
+  else
+    rm -rf "$conda_env_prefix"
+    echo "Creating temporary pipeline conda env: $conda_env_prefix"
+    set +e
+    conda create -y -p "$conda_env_prefix" "${channel_args[@]}" $conda_packages >"$log_dir/pipeline-conda.stdout.log" 2>"$log_dir/pipeline-conda.stderr.log"
+    conda_status=$?
+    set -e
+    echo "conda_create_status=$conda_status"
+    if [[ $conda_status -ne 0 ]]; then
+      echo "[FAIL] pipeline conda create failed"
+      tail -n 100 "$log_dir/pipeline-conda.stderr.log" || true
+      exit "$conda_status"
+    fi
   fi
 
   export PATH="$conda_env_prefix/bin:$PATH"
@@ -67,7 +104,7 @@ echo "Running pipeline command"
 echo "WES_PIPELINE_CMD=${WES_PIPELINE_CMD:?WES_PIPELINE_CMD is required when WES_MODE=pipeline}"
 bash -lc "$WES_PIPELINE_CMD"
 
-if [[ "$use_conda_pipeline" == "1" && -d "$conda_env_prefix" ]]; then
+if [[ "$use_conda_pipeline" == "1" && "$reuse_shared_conda" != "1" && -d "$conda_env_prefix" ]]; then
   echo "Cleaning temporary pipeline conda env: $conda_env_prefix"
   rm -rf "$conda_env_prefix"
 fi

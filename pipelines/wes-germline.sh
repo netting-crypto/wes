@@ -340,7 +340,7 @@ for sample_id in "${SAMPLE_IDS[@]}"; do
       -L "$TARGET_BED" \
       -ERC GVCF \
       -O "$sample_gvcf"
-    gatk IndexFeatureFile -I "$sample_gvcf"
+    gatk IndexFeatureFile -F "$sample_gvcf"
   else
     sample_gvcf="$(infer_sample_gvcf "$sample_id" || true)"
   fi

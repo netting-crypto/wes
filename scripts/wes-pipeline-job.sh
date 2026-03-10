@@ -26,6 +26,23 @@ echo "project_dir=$project_dir"
 echo "output_dir=$output_dir"
 echo "use_conda_pipeline=$use_conda_pipeline"
 
+required_pipeline_tools=(bwa samtools bcftools gatk fastp fastqc)
+
+shared_env_is_usable() {
+  local prefix="$1"
+  local tool_path=""
+
+  for tool in "${required_pipeline_tools[@]}"; do
+    tool_path="$prefix/bin/$tool"
+    if [[ ! -x "$tool_path" ]]; then
+      echo "Shared pipeline env missing required tool: $tool_path"
+      return 1
+    fi
+  done
+
+  return 0
+}
+
 if [[ "$use_conda_pipeline" == "1" ]]; then
   if ! command -v conda >/dev/null 2>&1; then
     echo "conda is required when WES_PIPELINE_USE_CONDA=1" >&2
@@ -45,8 +62,12 @@ if [[ "$use_conda_pipeline" == "1" ]]; then
     lock_dir="${shared_env_prefix}.lock"
     conda_env_prefix="$shared_env_prefix"
 
-    if [[ ! -x "$conda_env_prefix/bin/gatk" ]]; then
+    if ! shared_env_is_usable "$conda_env_prefix"; then
       if mkdir "$lock_dir" 2>/dev/null; then
+        if [[ -d "$conda_env_prefix" ]]; then
+          echo "Removing incomplete shared pipeline conda env: $conda_env_prefix"
+          rm -rf "$conda_env_prefix"
+        fi
         echo "Creating shared pipeline conda env: $conda_env_prefix"
         cleanup_lock() {
           rmdir "$lock_dir" 2>/dev/null || true
@@ -110,3 +131,4 @@ if [[ "$use_conda_pipeline" == "1" && "$reuse_shared_conda" != "1" && -d "$conda
 fi
 
 echo "Pipeline wrapper finished."
+

@@ -24,6 +24,23 @@ echo "sample_sheet=$sample_sheet"
 echo "array_task_id=$array_task_id"
 echo "output_dir=$output_dir"
 
+required_preprocess_tools=(bwa samtools bcftools gatk fastp)
+
+shared_env_is_usable() {
+  local prefix="$1"
+  local tool_path=""
+
+  for tool in "${required_preprocess_tools[@]}"; do
+    tool_path="$prefix/bin/$tool"
+    if [[ ! -x "$tool_path" ]]; then
+      echo "Shared preprocess env missing required tool: $tool_path"
+      return 1
+    fi
+  done
+
+  return 0
+}
+
 sample_id="$(awk -F'\t' -v target="$array_task_id" 'NR == 1 { next } ++i == target { print $1; exit }' "$sample_sheet")"
 if [[ -z "$sample_id" ]]; then
   echo "Could not resolve sample_id for array task $array_task_id" >&2
@@ -45,8 +62,12 @@ if [[ "$use_conda_pipeline" == "1" ]]; then
     channel_args+=(-c "$channel")
   done
 
-  if [[ ! -x "$shared_env_prefix/bin/gatk" ]]; then
+  if ! shared_env_is_usable "$shared_env_prefix"; then
     if mkdir "$lock_dir" 2>/dev/null; then
+      if [[ -d "$shared_env_prefix" ]]; then
+        echo "Removing incomplete shared preprocess conda env: $shared_env_prefix"
+        rm -rf "$shared_env_prefix"
+      fi
       echo "Creating shared preprocess conda env: $shared_env_prefix"
       cleanup_lock() {
         rmdir "$lock_dir" 2>/dev/null || true
@@ -88,3 +109,4 @@ echo "Running preprocess command: ${cmd[*]}"
 "${cmd[@]}"
 
 echo "Preprocess task finished: $sample_id"
+

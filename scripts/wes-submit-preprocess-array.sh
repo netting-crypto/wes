@@ -92,9 +92,18 @@ echo "sample_count=$sample_count"
 echo "array_spec=$array_spec"
 echo "SBATCH command: ${submit_cmd[*]}"
 
-submit_output="$("${submit_cmd[@]}" 2>&1)"
+set +e
+submit_output="$(${submit_cmd[@]} 2>&1)"
+submit_status=$?
+set -e
 printf '%s\n' "$submit_output" >> "$debug_log"
-printf '%s\n' "$submit_output"
+if [[ -n "$submit_output" ]]; then
+  printf '%s\n' "$submit_output"
+fi
+if [[ $submit_status -ne 0 ]]; then
+  echo "Slurm array submission failed with exit status $submit_status" >&2
+  exit "$submit_status"
+fi
 
 job_id="$(printf '%s\n' "$submit_output" | sed -n '1s/^\([0-9][0-9]*\).*/\1/p')"
 if [[ -z "$job_id" ]]; then

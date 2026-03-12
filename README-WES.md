@@ -167,3 +167,46 @@ When they are ready, pass all available Broad-style known-sites files with repea
   https://www.ensembl.org/info/docs/tools/vep/
 - Ensembl VEP cache:
   https://www.ensembl.org/info/docs/tools/vep/script/vep_cache.html
+
+## Workflow structure
+
+See `docs-wes-workflow.md` for a compact explanation of:
+- stage-by-stage inputs and outputs
+- how `family_id / role / affected` are used
+- why common population variant filtering is a downstream interpretation step
+
+## QC summary
+
+A first-pass QC summary can now be generated from staged outputs:
+
+```bash
+npm run wes-qc -- --out-dir output/wes/results/preprocess-only
+```
+
+This writes:
+- `qc-report/wes-qc-summary.json`
+- `qc-report/wes-qc-summary.csv`
+- `qc-report/wes-qc-summary.md`
+- `qc-report/wes-qc-summary.html`
+
+Current QC summary sources:
+- `fastp` JSON
+- `MarkDuplicates` metrics
+- per-sample `gvcf/*.meta.txt`
+
+This is the first reporting layer, not the final clinical interpretation layer.
+
+## Rotated preprocess submission
+
+To avoid queueing every preprocess batch on the same Slurm partition, use:
+
+```powershell
+pwsh scripts/submit-wes-preprocess-rotated.ps1
+```
+
+This rotates batch submissions across:
+- `CPU-64C256GB`
+- `CPU-96C3TB`
+- `CPU-192C768GB`
+
+and keeps each task small (`2 CPU`, `8G`, modest array concurrency) so the cluster scheduler is more likely to start them.

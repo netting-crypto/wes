@@ -210,3 +210,14 @@ This rotates batch submissions across:
 - `CPU-192C768GB`
 
 and keeps each task small (`2 CPU`, `8G`, modest array concurrency) so the cluster scheduler is more likely to start them.
+
+QC report can also be generated directly on the runner against the shared staged output directory:
+
+```bash
+WES_MODE=qc-report \
+WES_QC_OUT_DIR=/home/zhangmeigroup/luoxin23/wes-stage-results/preprocess-batch \
+WES_QC_SAMPLE_SHEET=config/wes/samples.from-excel.tsv \
+bash scripts/ci-submit-slurm.sh
+```
+
+This is useful when the shared output directory already contains multiple completed preprocess batches and you want one combined QC snapshot.

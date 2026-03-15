@@ -62,3 +62,4 @@ wes_submit:
       - output/wes/logs/*.log
       - output/wes/slurm/*.out
       - output/wes/slurm/*.err
+      - output/wes/results/qc-report/*

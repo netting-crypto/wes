@@ -29,6 +29,23 @@ if [[ "$wes_mode" == "preprocess-batch" ]]; then
   exit 0
 fi
 
+if [[ "$wes_mode" == "qc-report" ]]; then
+  qc_out_dir="${WES_QC_OUT_DIR:-${WES_STAGE_OUT_DIR:-$result_dir}}"
+  qc_report_dir="${WES_QC_REPORT_DIR:-$result_dir/qc-report}"
+  qc_sample_sheet="${WES_QC_SAMPLE_SHEET:-${WES_SAMPLE_SHEET:-}}"
+  qc_args=(--out-dir "$qc_out_dir" --report-dir "$qc_report_dir")
+  if [[ -n "$qc_sample_sheet" ]]; then
+    qc_args+=(--sample-sheet "$qc_sample_sheet")
+  fi
+  if [[ "${WES_QC_ONLY_COMPLETED:-0}" == "1" ]]; then
+    qc_args+=(--only-completed)
+  fi
+  echo "Generating WES QC report"
+  echo "node $project_dir/scripts/wes-qc-report.js ${qc_args[*]}"
+  node "$project_dir/scripts/wes-qc-report.js" "${qc_args[@]}"
+  exit 0
+fi
+
 # Clear inherited sbatch defaults so CI submission is driven only by explicit SLURM_* variables.
 unset SBATCH_ACCOUNT SBATCH_QOS SBATCH_PARTITION SBATCH_TIME SBATCH_MEM_PER_CPU SBATCH_MEM_PER_NODE SBATCH_MEM_PER_GPU SBATCH_GPUS SBATCH_NODES SBATCH_NTASKS SBATCH_CPUS_PER_TASK
 

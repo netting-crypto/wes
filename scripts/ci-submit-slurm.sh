@@ -34,6 +34,18 @@ if [[ "$wes_mode" == "qc-report" ]]; then
   qc_report_dir="${WES_QC_REPORT_DIR:-$result_dir/qc-report}"
   qc_sample_sheet="${WES_QC_SAMPLE_SHEET:-${WES_SAMPLE_SHEET:-}}"
   qc_args=(--out-dir "$qc_out_dir" --report-dir "$qc_report_dir")
+  node_bin="${NODE_BIN:-}"
+  if [[ -z "$node_bin" ]]; then
+    if command -v node >/dev/null 2>&1; then
+      node_bin="$(command -v node)"
+    elif command -v nodejs >/dev/null 2>&1; then
+      node_bin="$(command -v nodejs)"
+    else
+      echo "Neither node nor nodejs is available on PATH" >&2
+      echo "PATH=$PATH" >&2
+      exit 127
+    fi
+  fi
   if [[ -n "$qc_sample_sheet" ]]; then
     qc_args+=(--sample-sheet "$qc_sample_sheet")
   fi
@@ -41,8 +53,8 @@ if [[ "$wes_mode" == "qc-report" ]]; then
     qc_args+=(--only-completed)
   fi
   echo "Generating WES QC report"
-  echo "node $project_dir/scripts/wes-qc-report.js ${qc_args[*]}"
-  node "$project_dir/scripts/wes-qc-report.js" "${qc_args[@]}"
+  echo "$node_bin $project_dir/scripts/wes-qc-report.js ${qc_args[*]}"
+  "$node_bin" "$project_dir/scripts/wes-qc-report.js" "${qc_args[@]}"
   exit 0
 fi
 

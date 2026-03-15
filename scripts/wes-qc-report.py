@@ -248,12 +248,20 @@ def main():
         "has_gvcf",
         "fastp_input_reads",
         "fastp_output_reads",
+        "fastp_input_bases",
+        "fastp_output_bases",
         "fastp_retained_read_pct",
         "fastp_q30_rate",
         "fastp_gc_content",
         "read_pairs_examined",
         "percent_duplication",
         "estimated_library_size",
+        "unpaired_reads_examined",
+        "unmapped_reads",
+        "unpaired_read_duplicates",
+        "read_pair_duplicates",
+        "fastp_json",
+        "markdup_metrics",
         "bam",
         "gvcf",
     ]
@@ -288,7 +296,7 @@ def main():
         json.dumps({"summary": summary, "rows": rows}, indent=2, ensure_ascii=False), encoding="utf-8"
     )
     with (report_dir / "wes-qc-summary.csv").open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=columns)
+        writer = csv.DictWriter(handle, fieldnames=columns, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
     (report_dir / "wes-qc-summary.md").write_text(markdown + "\n", encoding="utf-8")

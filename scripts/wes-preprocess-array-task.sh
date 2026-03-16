@@ -24,6 +24,11 @@ echo "sample_sheet=$sample_sheet"
 echo "array_task_id=$array_task_id"
 echo "output_dir=$output_dir"
 
+if [[ -n "${SLURM_ENV_SETUP:-}" ]]; then
+  echo "Running SLURM_ENV_SETUP"
+  eval "$SLURM_ENV_SETUP"
+fi
+
 required_preprocess_tools=(bwa samtools bcftools gatk fastp)
 
 shared_env_is_usable() {

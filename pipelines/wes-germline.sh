@@ -308,9 +308,11 @@ for sample_id in "${SAMPLE_IDS[@]}"; do
       if [[ -f "$sorted_bam" ]] && bam_has_index "$sorted_bam"; then
         echo "Reusing existing sorted BAM: $sorted_bam"
       else
+        mkdir -p "$(dirname "$sorted_bam")"
         rg="@RG\tID:${sample_id}\tSM:${sample_id}\tPL:ILLUMINA\tLB:${family_id:-NA}\tPU:${sample_id}"
+        sort_prefix="$TMP_DIR/${sample_id}.sorted"
         "$ALIGNER" mem -t "$THREADS" -R "$rg" "$REF_FA" "$work_r1" "$work_r2" \
-          | samtools sort -@ "$THREADS" -o "$sorted_bam" -
+          | samtools sort -@ "$THREADS" -T "$sort_prefix" -o "$sorted_bam" -
         samtools index -@ "$THREADS" "$sorted_bam"
       fi
 

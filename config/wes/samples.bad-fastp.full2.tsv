@@ -1,0 +1,3 @@
+sample_id	family_id	role	affected	fastq_r1	fastq_r2	bam_path
+2301281S1OWC_L2_Q0067W0787	2301281S1OWC_L2_Q0067W0787	unknown	0	/home/zhangmeigroup/luoxin23/upload20251105/fastq/2301281S1OWC_L2_Q0067W0787.R1.fastq.gz	/home/zhangmeigroup/luoxin23/upload20251105/fastq/2301281S1OWC_L2_Q0067W0787.R2.fastq.gz	
+2301282S1OWC_L2_Q0068W0399	2301282S1OWC_L2_Q0068W0399	unknown	0	/home/zhangmeigroup/luoxin23/upload20251105/fastq/2301282S1OWC_L2_Q0068W0399.R1.fastq.gz	/home/zhangmeigroup/luoxin23/upload20251105/fastq/2301282S1OWC_L2_Q0068W0399.R2.fastq.gz	

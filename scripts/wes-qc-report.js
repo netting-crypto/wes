@@ -87,10 +87,21 @@ function readSampleSheet(file) {
       bam_path: cols[6] || ""
     }));
 }
-function collectFastp(sampleId) {
+function collectFastp(sampleId, badFastpJsonFiles) {
   const file = path.join(OUT_DIR, "qc", `${sampleId}.fastp.json`);
   if (!exists(file)) return {};
-  const data = readJson(file);
+  let data;
+  try {
+    data = readJson(file);
+  } catch (error) {
+    if (badFastpJsonFiles) {
+      badFastpJsonFiles.push({ sample_id: sampleId, path: file, error: error.message });
+    }
+    return {
+      fastp_json_error_path: file,
+      fastp_parse_error: error.message
+    };
+  }
   const summary = data.summary || {};
   const before = summary.before_filtering || {};
   const after = summary.after_filtering || {};
@@ -159,6 +170,10 @@ function renderTable(rows, columns) {
   const body = rows.map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(row[column])}</td>`).join("")}</tr>`).join("\n");
   return `<table><thead><tr>${headers}</tr></thead><tbody>${body}</tbody></table>`;
 }
+function renderBadFastpJsonFiles(items) {
+  if (!items || items.length === 0) return `<p class="empty">No malformed fastp JSON files detected.</p>`;
+  return `<ul>${items.map((item) => `<li><strong>${escapeHtml(item.sample_id)}</strong><br /><code>${escapeHtml(item.path)}</code><br /><span class="empty">${escapeHtml(item.error)}</span></li>`).join("")}</ul>`;
+}
 
 const sampleMetaFiles = listFiles(path.join(OUT_DIR, "gvcf"), ".meta.txt");
 const metaMap = new Map(sampleMetaFiles.map((file) => { const meta = parseKeyValueFile(file); return [meta.sample_id, meta]; }));
@@ -167,6 +182,7 @@ const sheetMap = new Map(sheetRows.map((row) => [row.sample_id, row]));
 const manifestSamples = readManifestSamples(path.join(OUT_DIR, "run.manifest.txt"));
 const sampleIds = sheetRows.length > 0 ? sheetRows.map((row) => row.sample_id) : Array.from(new Set([...manifestSamples, ...metaMap.keys()])).sort();
 
+const badFastpJsonFiles = [];
 let rows = sampleIds.map((sampleId) => {
   const meta = metaMap.get(sampleId) || {};
   const sheet = sheetMap.get(sampleId) || {};
@@ -181,7 +197,7 @@ let rows = sampleIds.map((sampleId) => {
     gvcf,
     has_bam: bam ? 1 : 0,
     has_gvcf: gvcf ? 1 : 0,
-    ...collectFastp(sampleId),
+    ...collectFastp(sampleId, badFastpJsonFiles),
     ...collectMarkdup(sampleId)
   };
   row.has_fastp = row.fastp_json ? 1 : 0;
@@ -204,10 +220,12 @@ const summary = {
   preprocess_missing: rows.filter((row) => row.preprocess_status !== "completed").length,
   samples_with_gvcf: rows.filter((row) => row.gvcf).length,
   samples_with_fastp: rows.filter((row) => Number.isFinite(row.fastp_output_reads)).length,
-  samples_with_markdup_metrics: rows.filter((row) => Number.isFinite(row.percent_duplication)).length
+  samples_with_markdup_metrics: rows.filter((row) => Number.isFinite(row.percent_duplication)).length,
+  bad_fastp_json_count: badFastpJsonFiles.length,
+  bad_fastp_json_samples: Array.from(new Set(badFastpJsonFiles.map((item) => item.sample_id))).sort()
 };
 
-const columns = ["sample_id","family_id","role","affected","preprocess_status","has_bam","has_fastp","has_markdup_metrics","has_gvcf","fastp_input_reads","fastp_output_reads","fastp_retained_read_pct","fastp_q30_rate","fastp_gc_content","read_pairs_examined","percent_duplication","estimated_library_size","bam","gvcf"];
+const columns = ["sample_id","family_id","role","affected","preprocess_status","has_bam","has_fastp","has_markdup_metrics","has_gvcf","fastp_input_reads","fastp_output_reads","fastp_retained_read_pct","fastp_q30_rate","fastp_gc_content","read_pairs_examined","percent_duplication","estimated_library_size","fastp_json","fastp_json_error_path","fastp_parse_error","bam","gvcf"];
 const markdown = [
   "# WES QC Summary",
   "",
@@ -223,6 +241,13 @@ const markdown = [
   `- samples_with_gvcf: ${summary.samples_with_gvcf}`,
   `- samples_with_fastp: ${summary.samples_with_fastp}`,
   `- samples_with_markdup_metrics: ${summary.samples_with_markdup_metrics}`,
+  `- bad_fastp_json_count: ${summary.bad_fastp_json_count}`,
+  "",
+  "## Warnings",
+  "",
+  ...(badFastpJsonFiles.length > 0
+    ? badFastpJsonFiles.map((item) => `- ${item.sample_id}: ${item.path} (${item.error})`)
+    : ["- No malformed fastp JSON files detected."]),
   "",
   "## Sample Table",
   "",
@@ -230,10 +255,10 @@ const markdown = [
 ].join("\n");
 
 const completedRows = rows.filter((row) => row.preprocess_status === "completed");
-const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>WES QC Summary</title><style>:root { --bg: #f2efe8; --panel: #fffcf6; --ink: #1f2937; --muted: #6b7280; --line: #e5ddcf; --accent: #9a3412; --accent-soft: #f59e0b; } * { box-sizing: border-box; } body { margin: 0; color: var(--ink); font-family: "Segoe UI", "PingFang SC", sans-serif; background: linear-gradient(180deg, #f8f4ec, var(--bg)); } .wrap { max-width: 1280px; margin: 0 auto; padding: 28px 18px 48px; } .hero, .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 22px; box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06); } .hero { padding: 24px; margin-bottom: 18px; background: linear-gradient(135deg, rgba(154,52,18,.98), rgba(120,53,15,.92)); color: white; } .hero h1 { margin: 0 0 8px; font-size: 32px; } .hero p { margin: 0; color: rgba(255,255,255,.84); } .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 18px; } .card { background: var(--panel); border: 1px solid var(--line); border-radius: 20px; padding: 16px 18px; } .label { color: var(--muted); font-size: 13px; margin-bottom: 8px; } .value { font-size: 28px; font-weight: 700; } .layout { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 18px; } .panel { padding: 18px; } h2 { margin: 0 0 12px; font-size: 20px; } .bar-row { display: grid; grid-template-columns: 180px 1fr 64px; gap: 12px; align-items: center; margin: 10px 0; } .bar-track { height: 12px; background: #f5ead7; border-radius: 999px; overflow: hidden; } .bar-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--accent-soft)); } .bar-label, .bar-value, table { font-size: 14px; } table { width: 100%; border-collapse: collapse; } th, td { padding: 10px 8px; text-align: left; border-bottom: 1px solid var(--line); } th { color: var(--muted); position: sticky; top: 0; background: var(--panel); } .table-wrap { max-height: 520px; overflow: auto; } .empty { color: var(--muted); margin: 0; }</style></head><body><div class="wrap"><section class="hero"><h1>WES QC Summary</h1><p>Shared staged output snapshot across completed preprocess samples.</p></section><section class="grid"><div class="card"><div class="label">Samples</div><div class="value">${summary.sample_count}</div></div><div class="card"><div class="label">Preprocess completed</div><div class="value">${summary.preprocess_completed}</div></div><div class="card"><div class="label">Preprocess missing</div><div class="value">${summary.preprocess_missing}</div></div><div class="card"><div class="label">Families</div><div class="value">${summary.family_count}</div></div><div class="card"><div class="label">Affected</div><div class="value">${summary.affected_count}</div></div><div class="card"><div class="label">With fastp QC</div><div class="value">${summary.samples_with_fastp}</div></div><div class="card"><div class="label">With duplication metrics</div><div class="value">${summary.samples_with_markdup_metrics}</div></div><div class="card"><div class="label">With gVCF</div><div class="value">${summary.samples_with_gvcf}</div></div></section><section class="layout"><div class="panel"><h2>fastp retained reads (%)</h2>${renderBars(completedRows, "fastp_retained_read_pct", "fastp_retained_read_pct")}</div><div class="panel"><h2>fastp Q30 (%)</h2>${renderBars(completedRows, "fastp_q30_rate", "fastp_q30_rate")}</div><div class="panel"><h2>GC content (%)</h2>${renderBars(completedRows, "fastp_gc_content", "fastp_gc_content")}</div><div class="panel"><h2>Duplication (%)</h2>${renderBars(completedRows, "percent_duplication", "percent_duplication")}</div></section><section class="panel"><h2>Per-sample QC table</h2><div class="table-wrap">${renderTable(rows, columns)}</div></section></div></body></html>`;
+const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>WES QC Summary</title><style>:root { --bg: #f2efe8; --panel: #fffcf6; --ink: #1f2937; --muted: #6b7280; --line: #e5ddcf; --accent: #9a3412; --accent-soft: #f59e0b; } * { box-sizing: border-box; } body { margin: 0; color: var(--ink); font-family: "Segoe UI", "PingFang SC", sans-serif; background: linear-gradient(180deg, #f8f4ec, var(--bg)); } .wrap { max-width: 1280px; margin: 0 auto; padding: 28px 18px 48px; } .hero, .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 22px; box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06); } .hero { padding: 24px; margin-bottom: 18px; background: linear-gradient(135deg, rgba(154,52,18,.98), rgba(120,53,15,.92)); color: white; } .hero h1 { margin: 0 0 8px; font-size: 32px; } .hero p { margin: 0; color: rgba(255,255,255,.84); } .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 18px; } .card { background: var(--panel); border: 1px solid var(--line); border-radius: 20px; padding: 16px 18px; } .label { color: var(--muted); font-size: 13px; margin-bottom: 8px; } .value { font-size: 28px; font-weight: 700; } .layout { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 18px; } .panel { padding: 18px; } h2 { margin: 0 0 12px; font-size: 20px; } .bar-row { display: grid; grid-template-columns: 180px 1fr 64px; gap: 12px; align-items: center; margin: 10px 0; } .bar-track { height: 12px; background: #f5ead7; border-radius: 999px; overflow: hidden; } .bar-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--accent-soft)); } .bar-label, .bar-value, table { font-size: 14px; } table { width: 100%; border-collapse: collapse; } th, td { padding: 10px 8px; text-align: left; border-bottom: 1px solid var(--line); } th { color: var(--muted); position: sticky; top: 0; background: var(--panel); } .table-wrap { max-height: 520px; overflow: auto; } .empty { color: var(--muted); margin: 0; } ul { margin: 0; padding-left: 20px; } li { margin: 8px 0; }</style></head><body><div class="wrap"><section class="hero"><h1>WES QC Summary</h1><p>Shared staged output snapshot across completed preprocess samples.</p></section><section class="grid"><div class="card"><div class="label">Samples</div><div class="value">${summary.sample_count}</div></div><div class="card"><div class="label">Preprocess completed</div><div class="value">${summary.preprocess_completed}</div></div><div class="card"><div class="label">Preprocess missing</div><div class="value">${summary.preprocess_missing}</div></div><div class="card"><div class="label">Families</div><div class="value">${summary.family_count}</div></div><div class="card"><div class="label">Affected</div><div class="value">${summary.affected_count}</div></div><div class="card"><div class="label">With fastp QC</div><div class="value">${summary.samples_with_fastp}</div></div><div class="card"><div class="label">With duplication metrics</div><div class="value">${summary.samples_with_markdup_metrics}</div></div><div class="card"><div class="label">With gVCF</div><div class="value">${summary.samples_with_gvcf}</div></div><div class="card"><div class="label">Malformed fastp JSON</div><div class="value">${summary.bad_fastp_json_count}</div></div></section><section class="panel"><h2>Warnings</h2>${renderBadFastpJsonFiles(badFastpJsonFiles)}</section><section class="layout"><div class="panel"><h2>fastp retained reads (%)</h2>${renderBars(completedRows, "fastp_retained_read_pct", "fastp_retained_read_pct")}</div><div class="panel"><h2>fastp Q30 (%)</h2>${renderBars(completedRows, "fastp_q30_rate", "fastp_q30_rate")}</div><div class="panel"><h2>GC content (%)</h2>${renderBars(completedRows, "fastp_gc_content", "fastp_gc_content")}</div><div class="panel"><h2>Duplication (%)</h2>${renderBars(completedRows, "percent_duplication", "percent_duplication")}</div></section><section class="panel"><h2>Per-sample QC table</h2><div class="table-wrap">${renderTable(rows, columns)}</div></section></div></body></html>`;
 
 fs.mkdirSync(REPORT_DIR, { recursive: true });
-fs.writeFileSync(path.join(REPORT_DIR, "wes-qc-summary.json"), JSON.stringify({ summary, rows }, null, 2));
+fs.writeFileSync(path.join(REPORT_DIR, "wes-qc-summary.json"), JSON.stringify({ summary, rows, bad_fastp_json_files: badFastpJsonFiles }, null, 2));
 fs.writeFileSync(path.join(REPORT_DIR, "wes-qc-summary.csv"), buildCsv(rows, columns), "utf8");
 fs.writeFileSync(path.join(REPORT_DIR, "wes-qc-summary.md"), `${markdown}\n`, "utf8");
 fs.writeFileSync(path.join(REPORT_DIR, "wes-qc-summary.html"), html, "utf8");

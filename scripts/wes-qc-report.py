@@ -86,11 +86,16 @@ def read_sample_sheet(path: Path):
     return rows
 
 
-def collect_fastp(out_dir: Path, sample_id: str):
+def collect_fastp(out_dir: Path, sample_id: str, bad_fastp_json_files=None):
     path = out_dir / "qc" / f"{sample_id}.fastp.json"
     if not path.exists():
         return {}
-    data = read_json(path)
+    try:
+        data = read_json(path)
+    except (OSError, json.JSONDecodeError) as exc:
+        if bad_fastp_json_files is not None:
+            bad_fastp_json_files.append({"sample_id": sample_id, "path": str(path), "error": str(exc)})
+        return {"fastp_json_error_path": str(path), "fastp_parse_error": str(exc)}
     before = (((data or {}).get("summary") or {}).get("before_filtering") or {})
     after = (((data or {}).get("summary") or {}).get("after_filtering") or {})
     return {
@@ -162,6 +167,22 @@ def render_table(rows, columns):
     return f"<table><thead><tr>{headers}</tr></thead><tbody>{''.join(body)}</tbody></table>"
 
 
+def render_bad_fastp_json_files(items):
+    if not items:
+        return '<p class="empty">No malformed fastp JSON files detected.</p>'
+    parts = ["<ul>"]
+    for item in items:
+        parts.append(
+            "<li><strong>{sample_id}</strong><br /><code>{path}</code><br /><span class=\"empty\">{error}</span></li>".format(
+                sample_id=html.escape(item["sample_id"]),
+                path=html.escape(item["path"]),
+                error=html.escape(item["error"]),
+            )
+        )
+    parts.append("</ul>")
+    return "".join(parts)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--out-dir", default=str(Path("output") / "wes" / "results"))
@@ -196,6 +217,7 @@ def main():
         sample_ids = sorted(set(manifest_samples) | set(meta_map.keys()))
 
     rows = []
+    bad_fastp_json_files = []
     for sample_id in sample_ids:
         meta = meta_map.get(sample_id, {})
         sheet = sheet_map.get(sample_id, {})
@@ -211,7 +233,7 @@ def main():
             "has_bam": 1 if bam else 0,
             "has_gvcf": 1 if gvcf else 0,
         }
-        row.update(collect_fastp(out_dir, sample_id))
+        row.update(collect_fastp(out_dir, sample_id, bad_fastp_json_files))
         row.update(collect_markdup(out_dir, sample_id))
         row["has_fastp"] = 1 if row.get("fastp_json") else 0
         row["has_markdup_metrics"] = 1 if row.get("markdup_metrics") else 0
@@ -234,6 +256,8 @@ def main():
         "samples_with_gvcf": sum(1 for row in rows if row["gvcf"]),
         "samples_with_fastp": sum(1 for row in rows if row.get("fastp_output_reads") is not None),
         "samples_with_markdup_metrics": sum(1 for row in rows if row.get("percent_duplication") is not None),
+        "bad_fastp_json_count": len(bad_fastp_json_files),
+        "bad_fastp_json_samples": sorted({item["sample_id"] for item in bad_fastp_json_files}),
     }
 
     columns = [
@@ -261,6 +285,8 @@ def main():
         "unpaired_read_duplicates",
         "read_pair_duplicates",
         "fastp_json",
+        "fastp_json_error_path",
+        "fastp_parse_error",
         "markdup_metrics",
         "bam",
         "gvcf",
@@ -283,17 +309,26 @@ def main():
             f"- samples_with_gvcf: {summary['samples_with_gvcf']}",
             f"- samples_with_fastp: {summary['samples_with_fastp']}",
             f"- samples_with_markdup_metrics: {summary['samples_with_markdup_metrics']}",
+            f"- bad_fastp_json_count: {summary['bad_fastp_json_count']}",
             "",
             f"HTML: {report_dir / 'wes-qc-summary.html'}",
             f"CSV: {report_dir / 'wes-qc-summary.csv'}",
+            "",
+            "## Warnings",
+            "",
         ]
+        + (
+            [f"- {item['sample_id']}: {item['path']} ({item['error']})" for item in bad_fastp_json_files]
+            if bad_fastp_json_files
+            else ["- No malformed fastp JSON files detected."]
+        )
     )
 
-    html_text = f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>WES QC Summary</title><style>:root {{ --bg: #f2efe8; --panel: #fffcf6; --ink: #1f2937; --muted: #6b7280; --line: #e5ddcf; --accent: #9a3412; --accent-soft: #f59e0b; }} * {{ box-sizing: border-box; }} body {{ margin: 0; color: var(--ink); font-family: "Segoe UI", "PingFang SC", sans-serif; background: linear-gradient(180deg, #f8f4ec, var(--bg)); }} .wrap {{ max-width: 1280px; margin: 0 auto; padding: 28px 18px 48px; }} .hero, .panel {{ background: var(--panel); border: 1px solid var(--line); border-radius: 22px; box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06); }} .hero {{ padding: 24px; margin-bottom: 18px; background: linear-gradient(135deg, rgba(154,52,18,.98), rgba(120,53,15,.92)); color: white; }} .hero h1 {{ margin: 0 0 8px; font-size: 32px; }} .hero p {{ margin: 0; color: rgba(255,255,255,.84); }} .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 18px; }} .card {{ background: var(--panel); border: 1px solid var(--line); border-radius: 20px; padding: 16px 18px; }} .label {{ color: var(--muted); font-size: 13px; margin-bottom: 8px; }} .value {{ font-size: 28px; font-weight: 700; }} .layout {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 18px; }} .panel {{ padding: 18px; }} h2 {{ margin: 0 0 12px; font-size: 20px; }} .bar-row {{ display: grid; grid-template-columns: 180px 1fr 64px; gap: 12px; align-items: center; margin: 10px 0; }} .bar-track {{ height: 12px; background: #f5ead7; border-radius: 999px; overflow: hidden; }} .bar-fill {{ height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--accent-soft)); }} .bar-label, .bar-value, table {{ font-size: 14px; }} table {{ width: 100%; border-collapse: collapse; }} th, td {{ padding: 10px 8px; text-align: left; border-bottom: 1px solid var(--line); }} th {{ color: var(--muted); position: sticky; top: 0; background: var(--panel); }} .table-wrap {{ max-height: 520px; overflow: auto; }} .empty {{ color: var(--muted); margin: 0; }}</style></head><body><div class="wrap"><section class="hero"><h1>WES QC Summary</h1><p>Shared staged output snapshot across completed preprocess samples.</p></section><section class="grid"><div class="card"><div class="label">Samples</div><div class="value">{summary['sample_count']}</div></div><div class="card"><div class="label">Preprocess completed</div><div class="value">{summary['preprocess_completed']}</div></div><div class="card"><div class="label">Preprocess missing</div><div class="value">{summary['preprocess_missing']}</div></div><div class="card"><div class="label">Families</div><div class="value">{summary['family_count']}</div></div><div class="card"><div class="label">Affected</div><div class="value">{summary['affected_count']}</div></div><div class="card"><div class="label">With fastp QC</div><div class="value">{summary['samples_with_fastp']}</div></div><div class="card"><div class="label">With duplication metrics</div><div class="value">{summary['samples_with_markdup_metrics']}</div></div><div class="card"><div class="label">With gVCF</div><div class="value">{summary['samples_with_gvcf']}</div></div></section><section class="layout"><div class="panel"><h2>fastp retained reads (%)</h2>{render_bars(completed_rows, 'fastp_retained_read_pct', 'fastp_retained_read_pct')}</div><div class="panel"><h2>fastp Q30 (%)</h2>{render_bars(completed_rows, 'fastp_q30_rate', 'fastp_q30_rate')}</div><div class="panel"><h2>GC content (%)</h2>{render_bars(completed_rows, 'fastp_gc_content', 'fastp_gc_content')}</div><div class="panel"><h2>Duplication (%)</h2>{render_bars(completed_rows, 'percent_duplication', 'percent_duplication')}</div></section><section class="panel"><h2>Per-sample QC table</h2><div class="table-wrap">{render_table(rows, columns)}</div></section></div></body></html>"""
+    html_text = f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>WES QC Summary</title><style>:root {{ --bg: #f2efe8; --panel: #fffcf6; --ink: #1f2937; --muted: #6b7280; --line: #e5ddcf; --accent: #9a3412; --accent-soft: #f59e0b; }} * {{ box-sizing: border-box; }} body {{ margin: 0; color: var(--ink); font-family: "Segoe UI", "PingFang SC", sans-serif; background: linear-gradient(180deg, #f8f4ec, var(--bg)); }} .wrap {{ max-width: 1280px; margin: 0 auto; padding: 28px 18px 48px; }} .hero, .panel {{ background: var(--panel); border: 1px solid var(--line); border-radius: 22px; box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06); }} .hero {{ padding: 24px; margin-bottom: 18px; background: linear-gradient(135deg, rgba(154,52,18,.98), rgba(120,53,15,.92)); color: white; }} .hero h1 {{ margin: 0 0 8px; font-size: 32px; }} .hero p {{ margin: 0; color: rgba(255,255,255,.84); }} .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 18px; }} .card {{ background: var(--panel); border: 1px solid var(--line); border-radius: 20px; padding: 16px 18px; }} .label {{ color: var(--muted); font-size: 13px; margin-bottom: 8px; }} .value {{ font-size: 28px; font-weight: 700; }} .layout {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 18px; }} .panel {{ padding: 18px; }} h2 {{ margin: 0 0 12px; font-size: 20px; }} .bar-row {{ display: grid; grid-template-columns: 180px 1fr 64px; gap: 12px; align-items: center; margin: 10px 0; }} .bar-track {{ height: 12px; background: #f5ead7; border-radius: 999px; overflow: hidden; }} .bar-fill {{ height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--accent-soft)); }} .bar-label, .bar-value, table {{ font-size: 14px; }} table {{ width: 100%; border-collapse: collapse; }} th, td {{ padding: 10px 8px; text-align: left; border-bottom: 1px solid var(--line); }} th {{ color: var(--muted); position: sticky; top: 0; background: var(--panel); }} .table-wrap {{ max-height: 520px; overflow: auto; }} .empty {{ color: var(--muted); margin: 0; }} ul {{ margin: 0; padding-left: 20px; }} li {{ margin: 8px 0; }}</style></head><body><div class="wrap"><section class="hero"><h1>WES QC Summary</h1><p>Shared staged output snapshot across completed preprocess samples.</p></section><section class="grid"><div class="card"><div class="label">Samples</div><div class="value">{summary['sample_count']}</div></div><div class="card"><div class="label">Preprocess completed</div><div class="value">{summary['preprocess_completed']}</div></div><div class="card"><div class="label">Preprocess missing</div><div class="value">{summary['preprocess_missing']}</div></div><div class="card"><div class="label">Families</div><div class="value">{summary['family_count']}</div></div><div class="card"><div class="label">Affected</div><div class="value">{summary['affected_count']}</div></div><div class="card"><div class="label">With fastp QC</div><div class="value">{summary['samples_with_fastp']}</div></div><div class="card"><div class="label">With duplication metrics</div><div class="value">{summary['samples_with_markdup_metrics']}</div></div><div class="card"><div class="label">With gVCF</div><div class="value">{summary['samples_with_gvcf']}</div></div><div class="card"><div class="label">Malformed fastp JSON</div><div class="value">{summary['bad_fastp_json_count']}</div></div></section><section class="panel"><h2>Warnings</h2>{render_bad_fastp_json_files(bad_fastp_json_files)}</section><section class="layout"><div class="panel"><h2>fastp retained reads (%)</h2>{render_bars(completed_rows, 'fastp_retained_read_pct', 'fastp_retained_read_pct')}</div><div class="panel"><h2>fastp Q30 (%)</h2>{render_bars(completed_rows, 'fastp_q30_rate', 'fastp_q30_rate')}</div><div class="panel"><h2>GC content (%)</h2>{render_bars(completed_rows, 'fastp_gc_content', 'fastp_gc_content')}</div><div class="panel"><h2>Duplication (%)</h2>{render_bars(completed_rows, 'percent_duplication', 'percent_duplication')}</div></section><section class="panel"><h2>Per-sample QC table</h2><div class="table-wrap">{render_table(rows, columns)}</div></section></div></body></html>"""
 
     report_dir.mkdir(parents=True, exist_ok=True)
     (report_dir / "wes-qc-summary.json").write_text(
-        json.dumps({"summary": summary, "rows": rows}, indent=2, ensure_ascii=False), encoding="utf-8"
+        json.dumps({"summary": summary, "rows": rows, "bad_fastp_json_files": bad_fastp_json_files}, indent=2, ensure_ascii=False), encoding="utf-8"
     )
     with (report_dir / "wes-qc-summary.csv").open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=columns, extrasaction="ignore")

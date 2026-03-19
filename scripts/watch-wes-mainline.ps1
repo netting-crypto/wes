@@ -187,6 +187,78 @@ function Initialize-State {
     }
 }
 
+function Remove-PendingActions {
+    param(
+        [Parameter(Mandatory = $true)][psobject]$State,
+        [Parameter(Mandatory = $true)][string]$FamilyId,
+        [Parameter(Mandatory = $true)][string]$StageName
+    )
+
+    $remaining = @(
+        $State.pending_actions |
+        Where-Object { $_.family_id -ne $FamilyId -or $_.stage -ne $StageName }
+    )
+    $removedCount = @($State.pending_actions).Count - $remaining.Count
+    $State.pending_actions = $remaining
+    return $removedCount
+}
+
+function Sync-StateWithConfig {
+    param(
+        [Parameter(Mandatory = $true)][psobject]$Config,
+        [Parameter(Mandatory = $true)][psobject]$State
+    )
+
+    foreach ($configFamily in $Config.families) {
+        $familyState = @($State.families | Where-Object { $_.family_id -eq [string]$configFamily.family_id })[0]
+        if ($null -eq $familyState) {
+            continue
+        }
+
+        $familyState.sample_sheet = [string]$configFamily.sample_sheet
+
+        foreach ($configStage in $configFamily.stages) {
+            $stageState = @($familyState.stages | Where-Object { $_.name -eq [string]$configStage.name })[0]
+            if ($null -eq $stageState) {
+                continue
+            }
+
+            $stageState.mode = [string]$configStage.mode
+            $stageState.pipeline_stage = [string](Get-OptionalProperty -Object $configStage -Name "pipeline_stage")
+            $stageState.stage_out_dir = [string](Get-OptionalProperty -Object $configStage -Name "stage_out_dir")
+            $stageState.auto_advance_to = [string](Get-OptionalProperty -Object $configStage -Name "auto_advance_to")
+            $stageState.resources = $configStage.resources
+
+            $configActive = Get-OptionalProperty -Object $configStage -Name "active_pipeline_id"
+            if ($null -eq $configActive) {
+                continue
+            }
+
+            $configActiveId = [int]$configActive
+            $currentActiveId = if ($null -ne $stageState.active_pipeline_id) { [int]$stageState.active_pipeline_id } else { 0 }
+            if ($currentActiveId -eq $configActiveId) {
+                continue
+            }
+
+            $stageState.active_pipeline_id = $configActiveId
+            $stageState.completed = $false
+            $stageState.last_seen_status = "configured"
+            $stageState.last_seen_at = (Get-Date).ToString("o")
+            $removedCount = Remove-PendingActions -State $State -FamilyId ([string]$familyState.family_id) -StageName ([string]$stageState.name)
+
+            $syncMessage = "config-sync: $($familyState.family_id) / $($stageState.name) -> pipeline $configActiveId"
+            if ($removedCount -gt 0) {
+                $syncMessage += " (cleared $removedCount pending)"
+            }
+
+            $State.action_log += [pscustomobject]@{
+                at = (Get-Date).ToString("o")
+                action = $syncMessage
+            }
+        }
+    }
+}
+
 function Add-PendingAction {
     param(
         [Parameter(Mandatory = $true)][psobject]$State,
@@ -264,6 +336,8 @@ if (Test-Path $statePath) {
 } else {
     $state = Initialize-State -Config $config
 }
+
+Sync-StateWithConfig -Config $config -State $state
 
 $terminalStates = @("success", "failed", "canceled", "skipped", "manual")
 $iteration = 0

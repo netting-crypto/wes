@@ -103,7 +103,7 @@
           "mode": "pipeline",
           "pipeline_stage": "all",
           "stage_out_dir": "/home/zhangmeigroup/luoxin23/wes-stage-results/family-comparison/family22",
-          "active_pipeline_id": 3436,
+          "active_pipeline_id": 3439,
           "resources": {
             "partition": "CPU-192C768GB",
             "qos": "qos_cpu_192c768gb",

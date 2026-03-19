@@ -1,0 +1,4 @@
+sample_id	family_id	role	affected	fastq_r1	fastq_r2	bam_path
+2004116S1OWC_L3_R90Y0000726	Family_14	unknown	0	/home/zhangmeigroup/luoxin23/upload20251105/fastq/2004116S1OWC_L3_R90Y0000726.R1.fastq.gz	/home/zhangmeigroup/luoxin23/upload20251105/fastq/2004116S1OWC_L3_R90Y0000726.R2.fastq.gz	/home/zhangmeigroup/luoxin23/wes-stage-results/preprocess-batch/bam/2004116S1OWC_L3_R90Y0000726.markdup.bam
+2004117S1OWC_L3_R65Y0000645	Family_14	unknown	0	/home/zhangmeigroup/luoxin23/upload20251105/fastq/2004117S1OWC_L3_R65Y0000645.R1.fastq.gz	/home/zhangmeigroup/luoxin23/upload20251105/fastq/2004117S1OWC_L3_R65Y0000645.R2.fastq.gz	
+2004118S1OWC_L3_R69F0000551	Family_14	unknown	0	/home/zhangmeigroup/luoxin23/upload20251105/fastq/2004118S1OWC_L3_R69F0000551.R1.fastq.gz	/home/zhangmeigroup/luoxin23/upload20251105/fastq/2004118S1OWC_L3_R69F0000551.R2.fastq.gz	

@@ -752,6 +752,41 @@ if ($null -eq $diagnosis) {
 }
 
 if ($null -eq $diagnosis) {
+    $envTracePatterns = @(
+        "conda is required when WES_PIPELINE_USE_CONDA=1",
+        "Neither python3, node, nor nodejs is available on PATH",
+        "command not found"
+    )
+
+    foreach ($pattern in $envTracePatterns) {
+        if ($traceText -match $pattern) {
+            $diagnosis = New-Diagnosis `
+                -Layer "runtime_environment" `
+                -FailureCode "runtime.env_missing" `
+                -Decision "notify_user" `
+                -SafeToResubmit $false `
+                -RequiresModelFix $false `
+                -RetryScope "none" `
+                -Summary "Pipeline reached the compute node, but the runtime environment was not initialized with the required tools." `
+                -StopReason "The compute node did not expose conda/tooling, so this needs environment setup rather than sample-level retry." `
+                -SampleId "" `
+                -SlurmJobId $slurmJobId `
+                -EvidencePaths @($tracePath, $failureSummaryPath, $manifestPath) `
+                -NeedsNotification $true `
+                -NotificationTitle "WES pipeline $PipelineId blocked by runtime environment setup" `
+                -NotificationMessage "Pipeline $PipelineId reached the compute node but could not find the required runtime environment. Check SLURM_ENV_SETUP / conda initialization before retrying." `
+                -PipelineStatus $pipelineStatus `
+                -JobStatus $jobStatus `
+                -JobName $jobName `
+                -JobStage $jobStage `
+                -PipelineUrl $pipelineUrl `
+                -JobUrl $jobUrl
+            break
+        }
+    }
+}
+
+if ($null -eq $diagnosis) {
     $qcEntry = Find-FirstMatch -Entries $logEntries -Patterns @(
         "JSONDecodeError",
         "json\.decoder\.JSONDecodeError",

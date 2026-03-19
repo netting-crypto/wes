@@ -31,6 +31,7 @@ variables:
   WES_GENERATE_SAMPLE_SHEET_FROM_FASTQ: "0"
   WES_PERSISTENT_RESULTS_ROOT: "/home/zhangmeigroup/luoxin23/wes-stage-results"
   WES_STAGE_OUT_DIR: "/home/zhangmeigroup/luoxin23/wes-stage-results/preprocess-batch"
+  SLURM_ENV_SETUP: "source ~/.bashrc"
   WES_SKIP_FASTQC: "1"
   WES_SKIP_BQSR_PREPROCESS: "1"
   WES_BATCH_MAX_CONCURRENT: "12"

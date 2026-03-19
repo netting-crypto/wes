@@ -8,6 +8,7 @@ log_dir="$output_dir/$logs_subdir"
 sample_sheet="${WES_SAMPLE_SHEET:?WES_SAMPLE_SHEET is required}"
 array_task_id="${SLURM_ARRAY_TASK_ID:?SLURM_ARRAY_TASK_ID is required}"
 shared_env_prefix="${WES_PREPROCESS_CONDA_ENV_PREFIX:-$output_dir/shared-envs/preprocess-conda}"
+conda_pkgs_dir="${WES_PREPROCESS_CONDA_PKGS_DIR:-$output_dir/shared-envs/conda-pkgs}"
 use_conda_pipeline="${WES_PIPELINE_USE_CONDA:-1}"
 conda_channels="${WES_CONDA_CHANNELS:-conda-forge bioconda}"
 conda_packages="${WES_PREPROCESS_CONDA_PACKAGES:-bwa samtools bcftools gatk4 htslib fastp fastqc}"
@@ -60,14 +61,16 @@ if [[ "$use_conda_pipeline" == "1" ]]; then
     exit 2
   fi
 
-  mkdir -p "$(dirname "$shared_env_prefix")"
+  mkdir -p "$(dirname "$shared_env_prefix")" "$conda_pkgs_dir"
   lock_dir="${shared_env_prefix}.lock"
   channel_args=()
   for channel in $conda_channels; do
     channel_args+=(-c "$channel")
   done
+  export CONDA_PKGS_DIRS="$conda_pkgs_dir"
+  echo "conda_pkgs_dir=$CONDA_PKGS_DIRS"
 
-  if ! shared_env_is_usable "$shared_env_prefix"; then
+  while ! shared_env_is_usable "$shared_env_prefix"; do
     if mkdir "$lock_dir" 2>/dev/null; then
       if [[ -d "$shared_env_prefix" ]]; then
         echo "Removing incomplete shared preprocess conda env: $shared_env_prefix"
@@ -87,7 +90,7 @@ if [[ "$use_conda_pipeline" == "1" ]]; then
         sleep 15
       done
     fi
-  fi
+  done
 
   export PATH="$shared_env_prefix/bin:$PATH"
 fi

@@ -8,6 +8,7 @@ log_dir="$output_dir/$logs_subdir"
 use_conda_pipeline="${WES_PIPELINE_USE_CONDA:-1}"
 conda_env_prefix="${WES_PIPELINE_CONDA_ENV_PREFIX:-${TMPDIR:-/tmp}/wes-pipeline-conda-${SLURM_JOB_ID:-$$}}"
 shared_env_prefix="${WES_PIPELINE_SHARED_CONDA_ENV_PREFIX:-$output_dir/shared-envs/pipeline-conda}"
+conda_pkgs_dir="${WES_PIPELINE_CONDA_PKGS_DIR:-$output_dir/shared-envs/conda-pkgs}"
 conda_channels="${WES_CONDA_CHANNELS:-conda-forge bioconda}"
 conda_packages="${WES_PIPELINE_CONDA_PACKAGES:-bwa samtools bcftools gatk4 htslib fastp fastqc}"
 generate_sample_sheet="${WES_GENERATE_SAMPLE_SHEET_FROM_FASTQ:-0}"
@@ -56,13 +57,16 @@ if [[ "$use_conda_pipeline" == "1" ]]; then
 
   echo "conda_channels=$conda_channels"
   echo "conda_packages=$conda_packages"
+  mkdir -p "$conda_pkgs_dir"
+  export CONDA_PKGS_DIRS="$conda_pkgs_dir"
+  echo "conda_pkgs_dir=$CONDA_PKGS_DIRS"
 
   if [[ "$reuse_shared_conda" == "1" ]]; then
     mkdir -p "$(dirname "$shared_env_prefix")"
     lock_dir="${shared_env_prefix}.lock"
     conda_env_prefix="$shared_env_prefix"
 
-    if ! shared_env_is_usable "$conda_env_prefix"; then
+    while ! shared_env_is_usable "$conda_env_prefix"; do
       if mkdir "$lock_dir" 2>/dev/null; then
         if [[ -d "$conda_env_prefix" ]]; then
           echo "Removing incomplete shared pipeline conda env: $conda_env_prefix"
@@ -91,9 +95,9 @@ if [[ "$use_conda_pipeline" == "1" ]]; then
           sleep 15
         done
       fi
-    else
-      echo "Reusing shared pipeline conda env: $conda_env_prefix"
-    fi
+    done
+
+    echo "Reusing shared pipeline conda env: $conda_env_prefix"
   else
     rm -rf "$conda_env_prefix"
     echo "Creating temporary pipeline conda env: $conda_env_prefix"

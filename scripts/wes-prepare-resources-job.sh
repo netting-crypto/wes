@@ -7,6 +7,7 @@ logs_subdir="${WES_LOGS_SUBDIR:-logs}"
 log_dir="$output_dir/$logs_subdir"
 resource_base="${WES_RESOURCE_BASE:-/home/zhangmeigroup/luoxin23/resources/hg38}"
 conda_env_prefix="${WES_CONDA_ENV_PREFIX:-${TMPDIR:-/tmp}/wes-resource-conda-${SLURM_JOB_ID:-$$}}"
+conda_pkgs_dir="${WES_RESOURCE_CONDA_PKGS_DIR:-$output_dir/conda-pkgs}"
 conda_channels="${WES_CONDA_CHANNELS:-conda-forge bioconda}"
 conda_packages="${WES_RESOURCE_CONDA_PACKAGES:-bwa samtools gatk4 htslib}"
 allow_missing_known_sites="${WES_ALLOW_MISSING_KNOWN_SITES:-0}"
@@ -33,6 +34,8 @@ if ! command -v conda >/dev/null 2>&1; then
   exit 2
 fi
 
+mkdir -p "$conda_pkgs_dir"
+export CONDA_PKGS_DIRS="$conda_pkgs_dir"
 rm -rf "$conda_env_prefix"
 channel_args=()
 for channel in $conda_channels; do
@@ -42,6 +45,7 @@ done
 echo
 echo "== Creating temporary conda env =="
 echo "conda_env_prefix=$conda_env_prefix"
+echo "conda_pkgs_dir=$CONDA_PKGS_DIRS"
 echo "conda_channels=$conda_channels"
 echo "conda_packages=$conda_packages"
 set +e

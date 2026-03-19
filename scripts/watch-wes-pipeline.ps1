@@ -31,7 +31,11 @@ function Invoke-Git {
         $process = Start-Process -FilePath "cmd.exe" -ArgumentList "/d /c git $argString" -NoNewWindow -Wait -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
         $stdout = if (Test-Path $stdoutPath) { [string](Get-Content -Raw -Path $stdoutPath) } else { "" }
         $stderr = if (Test-Path $stderrPath) { [string](Get-Content -Raw -Path $stderrPath) } else { "" }
-        $combined = [string]((@($stdout.TrimEnd(), $stderr.TrimEnd()) | Where-Object { $_ }) -join [Environment]::NewLine)
+        if ($null -eq $stdout) { $stdout = "" }
+        if ($null -eq $stderr) { $stderr = "" }
+        $stdoutText = if ([string]::IsNullOrEmpty($stdout)) { "" } else { $stdout.TrimEnd() }
+        $stderrText = if ([string]::IsNullOrEmpty($stderr)) { "" } else { $stderr.TrimEnd() }
+        $combined = [string]((@($stdoutText, $stderrText) | Where-Object { $_ }) -join [Environment]::NewLine)
 
         if ($process.ExitCode -ne 0) {
             throw "git $($Args -join ' ') failed:`n$combined"

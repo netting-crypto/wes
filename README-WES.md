@@ -221,3 +221,60 @@ bash scripts/ci-submit-slurm.sh
 ```
 
 This is useful when the shared output directory already contains multiple completed preprocess batches and you want one combined QC snapshot.
+
+## Core run evidence loop
+
+The first production loop is intentionally evidence-first and does not depend on
+Node, Feishu, or any cloud-side agent.
+
+Core scripts:
+
+- `scripts/submit-wes-preprocess-rotated.ps1`
+- `scripts/watch-wes-pipeline.ps1`
+- `scripts/diagnose-wes-pipeline.ps1`
+
+What each one guarantees:
+
+- `submit-wes-preprocess-rotated.ps1`
+  - submits one or more preprocess batches
+  - records every submission under `output/wes/submission-registry/preprocess-rotated.jsonl`
+- `watch-wes-pipeline.ps1`
+  - polls GitLab until the pipeline reaches a terminal state
+  - saves pipeline snapshots under `output/wes/gitlab-status/`
+  - optionally saves the latest job trace
+  - writes pending retry approvals under `output/wes/approvals/` when a tracked batch fails
+- `diagnose-wes-pipeline.ps1`
+  - classifies the latest terminal failure from trace + artifacts + manifest
+  - writes `pipeline-<id>-diagnosis.json` and `pipeline-<id>-diagnosis.md`
+  - writes a notification draft when the failure is not safe to auto-resubmit
+
+Typical preprocess flow:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\submit-wes-preprocess-rotated.ps1 -SampleSheets config/wes/samples.from-excel.remaining141.batch06.tsv -Json
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\watch-wes-pipeline.ps1 -PipelineId 3384 -SampleSheet config/wes/samples.from-excel.remaining141.batch06.tsv -DownloadLatestTrace
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\diagnose-wes-pipeline.ps1 -PipelineId 3384
+```
+
+Evidence preserved for each run:
+
+- GitLab pipeline snapshot: `output/wes/gitlab-status/pipeline-<id>.json|txt`
+- latest trace: `output/wes/gitlab-status/job-<jobid>-trace.log`
+- CI/Slurm manifest: `output/wes/result-manifest.txt`
+- failed task summary for preprocess arrays: `output/wes/failed-task-summary.txt`
+- stage manifest from the pipeline itself: `.../run.manifest.txt`
+
+Why later stages are resumable:
+
+- `pipelines/wes-germline.sh --stage gvcf` reuses existing staged BAMs under `bam/`
+- `pipelines/wes-germline.sh --stage joint` reuses existing staged gVCFs under `gvcf/`
+- existing indexed outputs are reused instead of recomputed
+
+This keeps three things separate:
+
+- submission success
+- runtime success
+- result correctness evidence
+
+The goal is not just "pipeline finished", but "pipeline finished and left enough
+artifacts to prove what ran, what was reused, and where it stopped".

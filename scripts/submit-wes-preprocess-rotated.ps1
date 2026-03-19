@@ -7,7 +7,8 @@ param(
         'config/wes/samples.from-excel.remaining141.batch05.tsv',
         'config/wes/samples.from-excel.remaining141.batch06.tsv'
     ),
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$Json
 )
 
 $ErrorActionPreference = 'Stop'
@@ -23,6 +24,25 @@ function Get-RequiredEnv {
         throw "Required environment variable is missing: $Name"
     }
     return $value
+}
+
+function Get-RepoRoot {
+    return Split-Path -Parent $PSScriptRoot
+}
+
+function Get-SubmissionRegistryPath {
+    $registryDir = Join-Path (Get-RepoRoot) 'output\wes\submission-registry'
+    if (-not (Test-Path $registryDir)) {
+        New-Item -ItemType Directory -Force -Path $registryDir | Out-Null
+    }
+    return Join-Path $registryDir 'preprocess-rotated.jsonl'
+}
+
+function Append-SubmissionRegistry {
+    param([psobject]$Record)
+
+    $registryPath = Get-SubmissionRegistryPath
+    ($Record | ConvertTo-Json -Compress -Depth 6) | Add-Content -Path $registryPath -Encoding UTF8
 }
 
 $apiBase = 'https://git.ustc.edu.cn/api/v4'
@@ -66,6 +86,7 @@ for ($i = 0; $i -lt $SampleSheets.Count; $i++) {
     if ($DryRun) {
         $results += [pscustomobject]@{
             sample_sheet = $sheet
+            batch_tag = $batchTag
             partition = $profile.Partition
             qos = $profile.Qos
             cpu = $profile.Cpu
@@ -78,8 +99,11 @@ for ($i = 0; $i -lt $SampleSheets.Count; $i++) {
 
     $payload = @{ ref = $Branch; variables = $variables }
     $response = Invoke-RestMethod -Method Post -Headers $headers -Uri "$apiBase/projects/$($project.id)/pipeline" -ContentType 'application/json' -Body ($payload | ConvertTo-Json -Depth 6)
-    $results += [pscustomobject]@{
+    $record = [pscustomobject]@{
+        submitted_at = (Get-Date).ToString('o')
+        branch = $Branch
         sample_sheet = $sheet
+        batch_tag = $batchTag
         partition = $profile.Partition
         qos = $profile.Qos
         cpu = $profile.Cpu
@@ -89,6 +113,12 @@ for ($i = 0; $i -lt $SampleSheets.Count; $i++) {
         web_url = $response.web_url
         status = $response.status
     }
+    $results += $record
+    Append-SubmissionRegistry -Record $record
 }
 
-$results | Format-Table -AutoSize
+if ($Json) {
+    $results | ConvertTo-Json -Depth 6
+} else {
+    $results | Format-Table -AutoSize
+}

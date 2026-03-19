@@ -4,6 +4,7 @@ param(
     [int]$PollIntervalSeconds = 60,
     [int]$TimeoutMinutes = 720,
     [string]$FeishuWebhookUrl = "",
+    [string]$SampleSheet = "",
     [switch]$DownloadLatestTrace
 )
 
@@ -47,7 +48,10 @@ function Get-RequiredEnv {
         [string]$Name
     )
 
-    $value = [Environment]::GetEnvironmentVariable($Name)
+    $value = [Environment]::GetEnvironmentVariable($Name, "User")
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        $value = [Environment]::GetEnvironmentVariable($Name, "Process")
+    }
     if ([string]::IsNullOrWhiteSpace($value)) {
         throw "Required environment variable is missing: $Name"
     }
@@ -190,6 +194,96 @@ function Save-LatestTrace {
     return $tracePath
 }
 
+function Get-SubmissionRecord {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepoRoot,
+        [Parameter(Mandatory = $true)]
+        [int]$PipelineId
+    )
+
+    $registryPath = Join-Path $RepoRoot 'output\wes\submission-registry\preprocess-rotated.jsonl'
+    if (-not (Test-Path $registryPath)) {
+        return $null
+    }
+
+    $lines = @(Get-Content -Path $registryPath)
+    for ($index = $lines.Count - 1; $index -ge 0; $index--) {
+        $line = $lines[$index].Trim()
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            continue
+        }
+        try {
+            $record = $line | ConvertFrom-Json
+        } catch {
+            continue
+        }
+        if ([int]$record.pipeline_id -eq $PipelineId) {
+            return $record
+        }
+    }
+    return $null
+}
+
+function Get-RetryApprovalPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepoRoot,
+        [Parameter(Mandatory = $true)]
+        [int]$PipelineId
+    )
+
+    $approvalDir = Join-Path $RepoRoot 'output\wes\approvals'
+    if (-not (Test-Path $approvalDir)) {
+        New-Item -ItemType Directory -Force -Path $approvalDir | Out-Null
+    }
+    return Join-Path $approvalDir "pending-retry-pipeline-$PipelineId.json"
+}
+
+function Save-RetryApproval {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepoRoot,
+        [Parameter(Mandatory = $true)]
+        [psobject]$Snapshot,
+        [psobject]$SubmissionRecord
+    )
+
+    $approval = [pscustomobject]@{
+        action = 'retry-preprocess'
+        state = 'pending'
+        pipeline_id = $Snapshot.Pipeline.id
+        pipeline_status = $Snapshot.Pipeline.status
+        pipeline_web_url = $Snapshot.Pipeline.web_url
+        batch_tag = $SubmissionRecord.batch_tag
+        sample_sheet = $SubmissionRecord.sample_sheet
+        branch = $SubmissionRecord.branch
+        requested_at = (Get-Date).ToString('o')
+    }
+    $approvalPath = Get-RetryApprovalPath -RepoRoot $RepoRoot -PipelineId $Snapshot.Pipeline.id
+    $approval | ConvertTo-Json -Depth 6 | Set-Content -Path $approvalPath -Encoding UTF8
+    return $approvalPath
+}
+
+function New-SubmissionRecordFallback {
+    param(
+        [Parameter(Mandatory = $true)]
+        [psobject]$Snapshot,
+        [Parameter(Mandatory = $true)]
+        [string]$SampleSheet
+    )
+
+    if ([string]::IsNullOrWhiteSpace($SampleSheet)) {
+        return $null
+    }
+
+    return [pscustomobject]@{
+        branch = $Snapshot.Pipeline.ref
+        sample_sheet = $SampleSheet
+        batch_tag = [System.IO.Path]::GetFileNameWithoutExtension($SampleSheet) -replace '^samples\.from-excel\.', ''
+    }
+}
+
 function Show-WindowsNotification {
     param(
         [Parameter(Mandatory = $true)]
@@ -275,10 +369,30 @@ if ($DownloadLatestTrace) {
     $tracePath = Save-LatestTrace -ApiBase $apiBase -ProjectId $project.id -Jobs $snapshot.Jobs -StatusDir $saved.StatusDir
 }
 
+$retryPromptStates = @('failed', 'canceled', 'manual')
+$submissionRecord = $null
+$approvalPath = $null
+if ($retryPromptStates -contains $snapshot.Pipeline.status) {
+    $submissionRecord = Get-SubmissionRecord -RepoRoot $repoRoot -PipelineId $PipelineId
+    if (-not $submissionRecord) {
+        $submissionRecord = New-SubmissionRecordFallback -Snapshot $snapshot -SampleSheet $SampleSheet
+    }
+    if ($submissionRecord) {
+        $approvalPath = Save-RetryApproval -RepoRoot $repoRoot -Snapshot $snapshot -SubmissionRecord $submissionRecord
+    }
+}
+
 $jobSummary = (($snapshot.Jobs | Sort-Object id | ForEach-Object { "[{0}] {1}/{2}" -f $_.status, $_.stage, $_.name }) -join "; ")
 $message = "WES pipeline $PipelineId finished: $($snapshot.Pipeline.status)`n$jobSummary`n$($snapshot.Pipeline.web_url)"
 if ($tracePath) {
     $message += "`ntrace=$tracePath"
+}
+if ($approvalPath) {
+    $message += "`nretry_batch=$($submissionRecord.batch_tag)"
+    $message += "`napproval=$approvalPath"
+    $message += "`nconfirm via Feishu bot: retry $PipelineId"
+} elseif ($retryPromptStates -contains $snapshot.Pipeline.status) {
+    $message += "`nretry mapping unavailable for pipeline $PipelineId"
 }
 
 Show-WindowsNotification -Title "WES Pipeline $PipelineId" -Message "Status: $($snapshot.Pipeline.status)"

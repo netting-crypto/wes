@@ -1,0 +1,119 @@
+{
+  "api_base": "https://git.ustc.edu.cn/api/v4",
+  "project_path": "luoxin23/wes",
+  "branch": "feat/wes-germline-skeleton",
+  "max_auto_retries_per_stage": 1,
+  "auto_retry_failure_codes": [
+    "runtime.env_missing"
+  ],
+  "families": [
+    {
+      "family_id": "Family_14",
+      "sample_sheet": "config/wes/samples.family14.trio.tsv",
+      "stages": [
+        {
+          "name": "preprocess",
+          "mode": "preprocess-batch",
+          "active_pipeline_id": 3431,
+          "auto_advance_to": "compare",
+          "resources": {
+            "partition": "CPU-96C3TB",
+            "qos": "qos_cpu_96c3tb",
+            "cpus": "2",
+            "mem": "8G",
+            "time": "48:00:00",
+            "concurrent": "4",
+            "job_name": "pre-b96a-samples.family14.trio"
+          }
+        },
+        {
+          "name": "compare",
+          "mode": "pipeline",
+          "pipeline_stage": "all",
+          "stage_out_dir": "/home/zhangmeigroup/luoxin23/wes-stage-results/family-comparison/family14",
+          "active_pipeline_id": null,
+          "resources": {
+            "partition": "CPU-96C3TB",
+            "qos": "qos_cpu_96c3tb",
+            "cpus": "4",
+            "mem": "32G",
+            "time": "48:00:00",
+            "job_name": "fam14-all-compare"
+          }
+        }
+      ]
+    },
+    {
+      "family_id": "Family_21",
+      "sample_sheet": "config/wes/samples.family21.tsv",
+      "stages": [
+        {
+          "name": "preprocess",
+          "mode": "preprocess-batch",
+          "active_pipeline_id": 3435,
+          "auto_advance_to": "compare",
+          "resources": {
+            "partition": "CPU-64C256GB",
+            "qos": "qos_cpu_64c256gb",
+            "cpus": "2",
+            "mem": "8G",
+            "time": "48:00:00",
+            "concurrent": "4",
+            "job_name": "pre-b64a-samples.family21"
+          }
+        },
+        {
+          "name": "compare",
+          "mode": "pipeline",
+          "pipeline_stage": "all",
+          "stage_out_dir": "/home/zhangmeigroup/luoxin23/wes-stage-results/family-comparison/family21",
+          "active_pipeline_id": 3437,
+          "resources": {
+            "partition": "CPU-64C256GB",
+            "qos": "qos_cpu_64c256gb",
+            "cpus": "4",
+            "mem": "32G",
+            "time": "48:00:00",
+            "job_name": "fam21-all-compare"
+          }
+        }
+      ]
+    },
+    {
+      "family_id": "Family_22",
+      "sample_sheet": "config/wes/samples.family22.tsv",
+      "stages": [
+        {
+          "name": "preprocess",
+          "mode": "preprocess-batch",
+          "active_pipeline_id": 3432,
+          "auto_advance_to": "compare",
+          "resources": {
+            "partition": "CPU-192C768GB",
+            "qos": "qos_cpu_192c768gb",
+            "cpus": "2",
+            "mem": "8G",
+            "time": "48:00:00",
+            "concurrent": "4",
+            "job_name": "pre-b192a-samples.family22"
+          }
+        },
+        {
+          "name": "compare",
+          "mode": "pipeline",
+          "pipeline_stage": "all",
+          "stage_out_dir": "/home/zhangmeigroup/luoxin23/wes-stage-results/family-comparison/family22",
+          "active_pipeline_id": 3436,
+          "resources": {
+            "partition": "CPU-192C768GB",
+            "qos": "qos_cpu_192c768gb",
+            "cpus": "4",
+            "mem": "32G",
+            "time": "48:00:00",
+            "job_name": "fam22-all-compare"
+          }
+        }
+      ]
+    }
+  ]
+}

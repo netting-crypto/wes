@@ -127,7 +127,8 @@ fi
 
 echo "Running pipeline command"
 echo "WES_PIPELINE_CMD=${WES_PIPELINE_CMD:?WES_PIPELINE_CMD is required when WES_MODE=pipeline}"
-bash -lc "$WES_PIPELINE_CMD"
+# Use a non-login shell so the conda-backed PATH we just prepared is preserved.
+bash -c "$WES_PIPELINE_CMD"
 
 if [[ "$use_conda_pipeline" == "1" && "$reuse_shared_conda" != "1" && -d "$conda_env_prefix" ]]; then
   echo "Cleaning temporary pipeline conda env: $conda_env_prefix"

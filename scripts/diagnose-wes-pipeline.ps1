@@ -748,6 +748,7 @@ if ($null -eq $diagnosis) {
     $envEntry = Find-FirstMatch -Entries $logEntries -Patterns @(
         "conda is required when WES_PIPELINE_USE_CONDA=1",
         "Neither python3, node, nor nodejs is available on PATH",
+        "Missing command:",
         "command not found"
     )
 
@@ -809,6 +810,7 @@ if ($null -eq $diagnosis) {
     $envTracePatterns = @(
         "conda is required when WES_PIPELINE_USE_CONDA=1",
         "Neither python3, node, nor nodejs is available on PATH",
+        "Missing command:",
         "command not found"
     )
 

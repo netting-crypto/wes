@@ -718,6 +718,32 @@ if ($null -eq $diagnosis) {
     }
 }
 
+  if ($null -eq $diagnosis) {
+    $systemToolEntry = Find-FirstMatch -Entries $logEntries -Patterns @(
+        "awk: command not found",
+        "sed: command not found",
+        "grep: command not found"
+    )
+
+    if ($null -ne $systemToolEntry) {
+        $sampleId = if (-not [string]::IsNullOrWhiteSpace($systemToolEntry.SampleId)) { $systemToolEntry.SampleId } else { "" }
+        $diagnosis = New-Diagnosis `
+            -Layer "compute_env" `
+            -FailureCode "env.path_missing_system_tools" `
+            -Decision "notify_user" `
+            -SafeToResubmit $false `
+            -RequiresModelFix $true `
+            -RetryScope "none" `
+            -Summary "Compute-node PATH is missing baseline system tools, so the preprocess task cannot start normally." `
+            -StopReason "This points to a broken exported PATH on the compute node; repair the PATH baseline before resubmitting." `
+            -SampleId $sampleId `
+            -SlurmJobId $slurmJobId `
+            -EvidencePaths @($systemToolEntry.Path, $tracePath, $manifestPath) `
+            -NeedsNotification $true `
+            -JobUrl $jobUrl
+    }
+}
+
 if ($null -eq $diagnosis) {
     $envEntry = Find-FirstMatch -Entries $logEntries -Patterns @(
         "conda is required when WES_PIPELINE_USE_CONDA=1",
@@ -748,6 +774,34 @@ if ($null -eq $diagnosis) {
             -JobStage $jobStage `
             -PipelineUrl $pipelineUrl `
             -JobUrl $jobUrl
+    }
+  }
+
+  if ($null -eq $diagnosis) {
+    $systemToolTracePatterns = @(
+        "awk: command not found",
+        "sed: command not found",
+        "grep: command not found"
+    )
+
+    foreach ($pattern in $systemToolTracePatterns) {
+        if ($traceText -match $pattern) {
+            $diagnosis = New-Diagnosis `
+                -Layer "compute_env" `
+                -FailureCode "env.path_missing_system_tools" `
+                -Decision "notify_user" `
+                -SafeToResubmit $false `
+                -RequiresModelFix $true `
+                -RetryScope "none" `
+                -Summary "Compute-node PATH is missing baseline system tools, so the preprocess task cannot start normally." `
+                -StopReason "This points to a broken exported PATH on the compute node; repair the PATH baseline before resubmitting." `
+                -SampleId "" `
+                -SlurmJobId $slurmJobId `
+                -EvidencePaths @($tracePath, $failureSummaryPath, $manifestPath) `
+                -NeedsNotification $true `
+                -JobUrl $jobUrl
+            break
+        }
     }
 }
 

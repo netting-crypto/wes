@@ -240,6 +240,11 @@ function Sync-StateWithConfig {
                 continue
             }
 
+            $lastTerminalId = if ($null -ne $stageState.last_terminal_pipeline_id) { [int]$stageState.last_terminal_pipeline_id } else { 0 }
+            if ($stageState.completed -and $currentActiveId -eq 0 -and $lastTerminalId -eq $configActiveId) {
+                continue
+            }
+
             $stageState.active_pipeline_id = $configActiveId
             $stageState.completed = $false
             $stageState.last_seen_status = "configured"

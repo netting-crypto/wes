@@ -63,12 +63,25 @@ def merge_intervals(intervals):
     return merged
 
 
+def load_chrom_sizes(path: str):
+    chrom_sizes = {}
+    with Path(path).open("r", encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            chrom, size_text = line.split("\t", 1)
+            chrom_sizes[chrom] = int(size_text)
+    return chrom_sizes
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-tsv", required=True)
     parser.add_argument("--output-bed", required=True)
     parser.add_argument("--padding", type=int, default=100)
     parser.add_argument("--output-table")
+    parser.add_argument("--chrom-sizes")
     args = parser.parse_args()
 
     input_path = Path(args.input_tsv)
@@ -78,6 +91,7 @@ def main():
     intervals = []
     records = []
     skipped_records = []
+    chrom_sizes = load_chrom_sizes(args.chrom_sizes) if args.chrom_sizes else {}
 
     with input_path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.reader(handle, delimiter="\t")
@@ -140,6 +154,27 @@ def main():
             ref_len = max(1, len(ref))
             start = max(0, pos - 1 - args.padding)
             end = pos - 1 + ref_len + args.padding
+            if chrom_sizes:
+                chrom_size = chrom_sizes.get(chrom)
+                if chrom_size is None:
+                    skipped_records.append(
+                        {
+                            "lab_id": row[LAB_INDEX].strip(),
+                            "gene": row[GENE_INDEX].strip(),
+                            "coordinate": coord,
+                        }
+                    )
+                    continue
+                end = min(end, chrom_size)
+                if end <= start:
+                    skipped_records.append(
+                        {
+                            "lab_id": row[LAB_INDEX].strip(),
+                            "gene": row[GENE_INDEX].strip(),
+                            "coordinate": coord,
+                        }
+                    )
+                    continue
             intervals.append((chrom, start, end))
             records.append(
                 {

@@ -14,6 +14,9 @@ conda_packages="${WES_PIPELINE_CONDA_PACKAGES:-bwa samtools bcftools gatk4 htsli
 generate_sample_sheet="${WES_GENERATE_SAMPLE_SHEET_FROM_FASTQ:-0}"
 generated_sample_sheet_path="${WES_GENERATED_SAMPLE_SHEET_PATH:-$project_dir/config/wes/samples.generated.tsv}"
 reuse_shared_conda="${WES_PIPELINE_REUSE_SHARED_CONDA:-1}"
+base_bed_path="${WES_BED_PATH:-}"
+extra_interval_bed="${WES_EXTRA_INTERVAL_BED:-}"
+merged_bed_path="${WES_MERGED_BED_PATH:-$output_dir/targets/merged_targets.bed}"
 
 mkdir -p "$output_dir" "$log_dir"
 
@@ -28,6 +31,18 @@ echo "output_dir=$output_dir"
 echo "use_conda_pipeline=$use_conda_pipeline"
 
 required_pipeline_tools=(bwa samtools bcftools gatk fastp fastqc)
+
+resolve_path_if_needed() {
+  local input_path="$1"
+  if [[ -z "$input_path" ]]; then
+    return 0
+  fi
+  if [[ "$input_path" = /* ]]; then
+    printf '%s\n' "$input_path"
+  else
+    printf '%s\n' "$project_dir/$input_path"
+  fi
+}
 
 shared_env_is_usable() {
   local prefix="$1"
@@ -123,6 +138,21 @@ if [[ "$generate_sample_sheet" == "1" ]]; then
     --out "$generated_sample_sheet_path"
   export WES_SAMPLE_SHEET="$generated_sample_sheet_path"
   echo "WES_SAMPLE_SHEET=$WES_SAMPLE_SHEET"
+fi
+
+resolved_base_bed="$(resolve_path_if_needed "$base_bed_path")"
+resolved_extra_bed="$(resolve_path_if_needed "$extra_interval_bed")"
+if [[ -n "$resolved_base_bed" && -n "$resolved_extra_bed" ]]; then
+  mkdir -p "$(dirname "$merged_bed_path")"
+  echo "Merging target BED with extra hotspot BED"
+  echo "base_bed=$resolved_base_bed"
+  echo "extra_bed=$resolved_extra_bed"
+  bash "$project_dir/scripts/wes-merge-bed.sh" \
+    --base-bed "$resolved_base_bed" \
+    --extra-bed "$resolved_extra_bed" \
+    --output-bed "$merged_bed_path"
+  export WES_BED_PATH="$merged_bed_path"
+  echo "effective_bed=$WES_BED_PATH"
 fi
 
 echo "Running pipeline command"

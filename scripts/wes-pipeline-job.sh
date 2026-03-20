@@ -153,6 +153,10 @@ if [[ -n "$resolved_base_bed" && -n "$resolved_extra_bed" ]]; then
     --output-bed "$merged_bed_path"
   export WES_BED_PATH="$merged_bed_path"
   echo "effective_bed=$WES_BED_PATH"
+  if [[ -n "${WES_PIPELINE_CMD:-}" ]]; then
+    WES_PIPELINE_CMD="${WES_PIPELINE_CMD/--bed \"$resolved_base_bed\"/--bed \"$WES_BED_PATH\"}"
+    WES_PIPELINE_CMD="${WES_PIPELINE_CMD/--bed \"$base_bed_path\"/--bed \"$WES_BED_PATH\"}"
+  fi
 fi
 
 echo "Running pipeline command"

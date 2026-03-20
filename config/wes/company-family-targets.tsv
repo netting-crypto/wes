@@ -1,0 +1,6 @@
+﻿"family_id"	"sample_sheet"	"company_lab_id"	"sample_id"	"company_name"	"company_relation"	"gene"	"coordinate"	"variant"	"classification"	"conclusion"	"family_sample_count"	"family_bam_ready_count"	"family_role_known_count"	"family_affected_positive_count"
+"Family_14"	"config\wes\samples.family14.trio.tsv"	"2004116S1"	"2004116S1OWC_L3_R90Y0000726"	"R-12张*亭"	"先证者"	"CYP4V2"	"4:187122302:ATCATACAGGTCATCGCT:AGC"	"c.802-8_810delinsGC"	"PAT"	"阳性"	"3"	"1"	"0"	"0"
+"Family_14"	"config\wes\samples.family14.trio.tsv"	"2004116S1"	"2004116S1OWC_L3_R90Y0000726"	"R-12张*亭"	"先证者"	"FSCN2"	"17:79503904:G:A"	"c.1277G>A(p.Arg426His)"	"VUS"	"阳性"	"3"	"1"	"0"	"0"
+"Family_14"	"config\wes\samples.family14.trio.tsv"	"2004116S1"	"2004116S1OWC_L3_R90Y0000726"	"R-12张*亭"	"先证者"	"RBP3"	"10:48390091:C:A"	"c.787G>T(p.Ala263Ser)"	"VUS"	"阳性"	"3"	"1"	"0"	"0"
+"Family_21"	"config\wes\samples.family21.tsv"	"2101039S1"	"2101039S1OWC_L1_R64Y0000684"	"R-18柴*"	"先证者"	"RPE65"	"1:68915579:G:A"	"c.10C>T(p.Gln4Ter)"	"VUS"	"阳性"	"4"	"4"	"0"	"0"
+"Family_22"	"config\wes\samples.family22.tsv"	"2101464S1"	"2101464S1OWC_L1_R48Y0000647"	"R-20王*刚"	"先证者"	"RPGR"	"X:38146189:C:CTCTCCATT"	"c.2055_2062dup(p.Arg688LysfsTer12)"	"LP"	"阳性"	"3"	"3"	"0"	"0"

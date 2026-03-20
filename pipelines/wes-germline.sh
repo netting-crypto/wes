@@ -119,6 +119,11 @@ feature_has_index() {
   [[ -f "${feature_path}.idx" || -f "${feature_path}.tbi" ]]
 }
 
+feature_is_readable() {
+  local feature_path="$1"
+  bcftools view -h "$feature_path" >/dev/null 2>&1
+}
+
 ensure_reference_sidecars() {
   local ref_fa="$1"
   local dict_path="${ref_fa%.*}.dict"
@@ -362,12 +367,18 @@ for sample_id in "${SAMPLE_IDS[@]}"; do
   fi
 
   if should_run_gvcf; then
-    if [[ -f "$sample_gvcf" ]] && feature_has_index "$sample_gvcf"; then
+    if [[ -f "$sample_gvcf" ]] && feature_has_index "$sample_gvcf" && feature_is_readable "$sample_gvcf"; then
       echo "Reusing existing gVCF: $sample_gvcf"
     else
       if [[ -f "$sample_gvcf" ]]; then
-        echo "gVCF exists without index; rebuilding index: $sample_gvcf"
-      else
+        if feature_is_readable "$sample_gvcf"; then
+          echo "gVCF exists without a usable index; rebuilding index: $sample_gvcf"
+        else
+          echo "Existing gVCF is unreadable; removing stale outputs and regenerating: $sample_gvcf"
+          rm -f "$sample_gvcf" "${sample_gvcf}.idx" "${sample_gvcf}.tbi"
+        fi
+      fi
+      if [[ ! -f "$sample_gvcf" ]]; then
         gatk HaplotypeCaller \
           -R "$REF_FA" \
           -I "$final_bam" \

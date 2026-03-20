@@ -90,7 +90,7 @@ if (-not $DryRun) {
 
 $results = @()
 foreach ($familyId in $selectedFamilies) {
-    $familyConfig = @($config.families | Where-Object { $_.family_id -eq $familyId })[0]
+    $familyConfig = @($config.families | Where-Object { $_.family_id -eq $familyId } | Select-Object -First 1)
     if ($null -eq $familyConfig) {
         Write-Warning "Skip ${familyId}: not found in controller config"
         continue
@@ -102,7 +102,7 @@ foreach ($familyId in $selectedFamilies) {
         continue
     }
 
-    $compareStage = @($familyConfig.stages | Where-Object { $_.name -eq 'compare' })[0]
+    $compareStage = @($familyConfig.stages | Where-Object { $_.name -eq 'compare' } | Select-Object -First 1)
     if ($null -eq $compareStage) {
         Write-Warning "Skip ${familyId}: compare stage missing in controller config"
         continue

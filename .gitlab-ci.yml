@@ -89,13 +89,13 @@ scRNA_rp_prioritization:
     SCRNA_HEARTBEAT_SECONDS: "300"
     SCRNA_STALL_SECONDS: "1800"
     SLURM_JOB_NAME: "scrna-rp-prioritize"
-    SLURM_PARTITION: "CPU-64C256GB"
-    SLURM_QOS: "qos_cpu_64c256gb"
+    SLURM_PARTITION: "test"
+    SLURM_QOS: ""
     SLURM_NODES: "1"
     SLURM_NTASKS: "1"
-    SLURM_CPUS_PER_TASK: "4"
-    SLURM_MEM: "16G"
-    SLURM_TIME: "48:00:00"
+    SLURM_CPUS_PER_TASK: "2"
+    SLURM_MEM: "8G"
+    SLURM_TIME: "00:20:00"
   script:
     - bash scripts/ci-submit-slurm.sh
   artifacts:

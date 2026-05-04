@@ -60,6 +60,9 @@ fi
 
 # Clear inherited sbatch defaults so CI submission is driven only by explicit SLURM_* variables.
 unset SBATCH_ACCOUNT SBATCH_QOS SBATCH_PARTITION SBATCH_TIME SBATCH_MEM_PER_CPU SBATCH_MEM_PER_NODE SBATCH_MEM_PER_GPU SBATCH_GPUS SBATCH_NODES SBATCH_NTASKS SBATCH_CPUS_PER_TASK
+if [[ -z "$slurm_qos" ]]; then
+  unset SLURM_QOS
+fi
 
 submit_cmd=(
   sbatch

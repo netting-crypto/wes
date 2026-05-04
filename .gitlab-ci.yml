@@ -1,5 +1,6 @@
 stages:
   - wes
+  - scrna
 
 variables:
   OUTPUT_DIR: "$CI_PROJECT_DIR/output/wes"
@@ -53,6 +54,12 @@ wes_submit:
   timeout: 48 hours
   tags:
     - wes
+  rules:
+    - if: '$SCRNA_RP_ENABLE == "1"'
+      when: never
+    - if: '$WES_MODE == "scRNA-rp-prioritization"'
+      when: never
+    - when: on_success
   script:
     - bash scripts/ci-submit-slurm.sh
   artifacts:
@@ -64,3 +71,41 @@ wes_submit:
       - output/wes/slurm/*.out
       - output/wes/slurm/*.err
       - output/wes/results/qc-report/*
+
+scRNA_rp_prioritization:
+  stage: scrna
+  timeout: 48 hours
+  tags:
+    - wes
+  rules:
+    - if: '$SCRNA_RP_ENABLE == "1"'
+    - if: '$WES_MODE == "scRNA-rp-prioritization"'
+  variables:
+    WES_MODE: "scRNA-rp-prioritization"
+    OUTPUT_DIR: "$CI_PROJECT_DIR/output/scrna"
+    SCRNA_MANIFEST: "$CI_PROJECT_DIR/config/scrna/rp_manifest.tsv"
+    SCRNA_DATA_ROOT: "/home/zhangmeigroup/luoxin23/scrna-rp-data"
+    SCRNA_DOWNLOAD_RETRIES: "2"
+    SCRNA_HEARTBEAT_SECONDS: "300"
+    SCRNA_STALL_SECONDS: "1800"
+    SLURM_JOB_NAME: "scrna-rp-prioritize"
+    SLURM_PARTITION: "CPU-64C256GB"
+    SLURM_QOS: "qos_cpu_64c256gb"
+    SLURM_NODES: "1"
+    SLURM_NTASKS: "1"
+    SLURM_CPUS_PER_TASK: "4"
+    SLURM_MEM: "16G"
+    SLURM_TIME: "48:00:00"
+  script:
+    - bash scripts/ci-submit-slurm.sh
+  artifacts:
+    when: always
+    expire_in: 14 days
+    paths:
+      - output/scrna/tree.txt
+      - output/scrna/logs/*.log
+      - output/scrna/slurm/*.out
+      - output/scrna/slurm/*.err
+      - output/scrna/results/*.tsv
+      - output/scrna/results/*.md
+      - output/scrna/results/*.json

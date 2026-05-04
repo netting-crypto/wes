@@ -33,6 +33,9 @@ case "$wes_mode" in
       bash -lc "${WES_PIPELINE_CMD:?WES_PIPELINE_CMD is required when WES_MODE=pipeline}"
     fi
     ;;
+  scRNA-rp-prioritization)
+    bash "$project_dir/scripts/scrna-rp-prioritization.sh"
+    ;;
   *)
     echo "Unsupported WES_MODE: $wes_mode" >&2
     exit 2

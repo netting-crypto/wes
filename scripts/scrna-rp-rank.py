@@ -120,13 +120,22 @@ def parse_download_status(path):
 def find_candidate_table(explicit):
     candidates = [explicit] if explicit else []
     candidates.extend([
-        "config/wes/company-family-targets.tsv",
+        "config/wes/company-analysis-results.tsv",
         "config/wes/company-hotspots.tsv",
+        "config/wes/company-family-targets.tsv",
         "output/wes/results/family_candidates_functional_classified.csv",
     ])
+    available = []
     for item in candidates:
         if item and Path(item).exists():
-            return Path(item)
+            try:
+                row_count = len(read_tsv(item))
+            except Exception:
+                row_count = -1
+            available.append((row_count, Path(item)))
+    if available:
+        available.sort(key=lambda pair: pair[0], reverse=True)
+        return available[0][1]
     return None
 
 
@@ -135,18 +144,35 @@ def read_candidates(path):
         return []
     rows = read_tsv(path)
     out = []
+    last_context = {
+        "family_id": "",
+        "sample_id": "",
+        "classification": "",
+        "conclusion": "",
+    }
     for row in rows:
         gene = row.get("gene") or row.get("基因") or row.get("Gene")
         if not clean(gene):
             continue
+        family_id = row.get("family_id") or row.get("Family") or row.get("样本名称") or last_context["family_id"]
+        sample_id = row.get("sample_id") or row.get("lab_id") or row.get("实验室编号") or row.get("优乐编号") or last_context["sample_id"]
+        classification = row.get("classification") or row.get("致病性评级") or row.get("acmg_classification") or last_context["classification"]
+        conclusion = row.get("conclusion") or row.get("报告结论") or last_context["conclusion"]
+        variant = row.get("variant") or row.get("变异（标准转录本对应注释）") or row.get("variant_hgvs") or ""
         out.append({
-            "family_id": row.get("family_id") or row.get("Family") or "",
-            "sample_id": row.get("sample_id") or row.get("lab_id") or row.get("实验室编号") or "",
+            "family_id": family_id,
+            "sample_id": sample_id,
             "gene": upper_gene(gene),
-            "variant": row.get("variant") or row.get("变异（标准转录本对应注释）") or row.get("variant_hgvs") or "",
-            "classification": row.get("classification") or row.get("致病性评级") or row.get("acmg_classification") or "",
-            "conclusion": row.get("conclusion") or row.get("报告结论") or "",
+            "variant": variant,
+            "classification": classification,
+            "conclusion": conclusion,
             "source_row": json.dumps(row, ensure_ascii=False),
+        })
+        last_context.update({
+            "family_id": family_id,
+            "sample_id": sample_id,
+            "classification": classification,
+            "conclusion": conclusion,
         })
     return out
 

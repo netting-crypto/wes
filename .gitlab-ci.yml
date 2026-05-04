@@ -1,6 +1,7 @@
 stages:
   - wes
   - scrna
+  - scrna_recover
 
 variables:
   OUTPUT_DIR: "$CI_PROJECT_DIR/output/wes"
@@ -75,6 +76,7 @@ wes_submit:
 scRNA_rp_prioritization:
   stage: scrna
   timeout: 48 hours
+  retry: 2
   tags:
     - wes
   rules:
@@ -97,6 +99,46 @@ scRNA_rp_prioritization:
     SLURM_MEM: "8G"
     SLURM_TIME: "00:20:00"
   script:
+    - bash scripts/ci-submit-slurm.sh
+  artifacts:
+    when: always
+    expire_in: 14 days
+    paths:
+      - output/scrna/tree.txt
+      - output/scrna/logs/*.log
+      - output/scrna/slurm/*.out
+      - output/scrna/slurm/*.err
+      - output/scrna/results/*.tsv
+      - output/scrna/results/*.md
+      - output/scrna/results/*.json
+
+scRNA_rp_prioritization_recovery:
+  stage: scrna_recover
+  timeout: 48 hours
+  retry: 1
+  tags:
+    - wes
+  when: on_failure
+  rules:
+    - if: '$SCRNA_RP_ENABLE == "1"'
+    - if: '$WES_MODE == "scRNA-rp-prioritization"'
+  variables:
+    WES_MODE: "scRNA-rp-prioritization"
+    OUTPUT_DIR: "$CI_PROJECT_DIR/output/scrna"
+    SCRNA_MANIFEST: "$CI_PROJECT_DIR/config/scrna/rp_manifest.tsv"
+    SCRNA_DATA_ROOT: "/home/zhangmeigroup/luoxin23/scrna-rp-data"
+    SCRNA_DOWNLOAD_RETRIES: "2"
+    SCRNA_HEARTBEAT_SECONDS: "300"
+    SCRNA_STALL_SECONDS: "1800"
+    SLURM_JOB_NAME: "scrna-rp-recover"
+  script:
+    - export SLURM_PARTITION="${SCRNA_RECOVERY_PARTITION:-test}"
+    - export SLURM_QOS="${SCRNA_RECOVERY_QOS:-qos_test}"
+    - export SLURM_NODES="${SCRNA_RECOVERY_NODES:-1}"
+    - export SLURM_NTASKS="${SCRNA_RECOVERY_NTASKS:-1}"
+    - export SLURM_CPUS_PER_TASK="${SCRNA_RECOVERY_CPUS_PER_TASK:-2}"
+    - export SLURM_MEM="${SCRNA_RECOVERY_MEM:-8G}"
+    - export SLURM_TIME="${SCRNA_RECOVERY_TIME:-00:20:00}"
     - bash scripts/ci-submit-slurm.sh
   artifacts:
     when: always

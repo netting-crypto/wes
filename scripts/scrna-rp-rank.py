@@ -168,7 +168,11 @@ def genes_from_text_file(path, limit=200000):
             for i, line in enumerate(handle):
                 if i > limit:
                     break
-                parts = line.rstrip("\n").split("\t")
+                raw = line.rstrip("\n")
+                if raw.count(",") > raw.count("\t"):
+                    parts = raw.split(",")
+                else:
+                    parts = raw.split("\t")
                 for part in parts[:3]:
                     add_gene(genes, part)
     except Exception:

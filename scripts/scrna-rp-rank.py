@@ -177,6 +177,19 @@ def read_candidates(path):
     return out
 
 
+def read_public_gene_table(path):
+    if not path or not Path(path).exists():
+        return {}
+    rows = read_tsv(path)
+    out = {}
+    for row in rows:
+        gene = upper_gene(row.get("gene", ""))
+        if not gene:
+            continue
+        out[gene] = row
+    return out
+
+
 def add_gene(gene_set, value):
     value = clean(value)
     if not value:
@@ -392,7 +405,7 @@ def wes_score(row):
     return score
 
 
-def build_scores(candidates, dataset_gene_sets, dataset_status):
+def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_table):
     variant_rows = []
     evidence_rows = []
     gene_agg = {}
@@ -409,6 +422,8 @@ def build_scores(candidates, dataset_gene_sets, dataset_status):
         disease_hits = [d for d in disease_dataset_ids if gene in dataset_gene_sets.get(d, set())]
         any_hits = [d for d, genes in dataset_gene_sets.items() if gene in genes]
         prior = GENE_CELL_PRIORS.get(gene)
+        public_row = public_gene_table.get(gene, {})
+        public_rp_related = public_row.get("rp_related", "") == "yes"
 
         expression_score = 0
         if cell_types:
@@ -422,6 +437,10 @@ def build_scores(candidates, dataset_gene_sets, dataset_status):
         if modules:
             expression_score += 10
         if prior:
+            expression_score += 10
+        if public_row:
+            expression_score += 10
+        if public_rp_related:
             expression_score += 10
 
         downgrade = []
@@ -448,6 +467,7 @@ def build_scores(candidates, dataset_gene_sets, dataset_status):
             "normal_dataset_hits": ";".join(normal_hits),
             "disease_dataset_hits": ";".join(disease_hits),
             "all_dataset_hits": ";".join(any_hits),
+            "public_rp_gene_support": public_row.get("source", "") if public_row else "",
             "downgrade_flags": ";".join(sorted(set(downgrade))),
             "classification": row.get("classification", ""),
             "conclusion": row.get("conclusion", ""),
@@ -468,6 +488,7 @@ def build_scores(candidates, dataset_gene_sets, dataset_status):
             "state_module_support": set(),
             "normal_dataset_hits": set(),
             "disease_dataset_hits": set(),
+            "public_rp_gene_support": set(),
             "downgrade_flags": set(),
             "top_interpretation": "",
         })
@@ -485,6 +506,8 @@ def build_scores(candidates, dataset_gene_sets, dataset_status):
         agg["state_module_support"].update(modules)
         agg["normal_dataset_hits"].update(normal_hits)
         agg["disease_dataset_hits"].update(disease_hits)
+        if public_row:
+            agg["public_rp_gene_support"].add(public_row.get("source", ""))
         agg["downgrade_flags"].update(downgrade)
 
     gene_rows = []
@@ -502,6 +525,7 @@ def build_scores(candidates, dataset_gene_sets, dataset_status):
             "state_module_support": ";".join(sorted(agg["state_module_support"])),
             "normal_dataset_hits": ";".join(sorted(agg["normal_dataset_hits"])),
             "disease_dataset_hits": ";".join(sorted(agg["disease_dataset_hits"])),
+            "public_rp_gene_support": ";".join(sorted(filter(None, agg["public_rp_gene_support"]))),
             "downgrade_flags": ";".join(sorted(agg["downgrade_flags"])),
             "top_interpretation": agg["top_interpretation"],
         })
@@ -588,6 +612,7 @@ def main():
     parser.add_argument("--download-dir", required=True)
     parser.add_argument("--status", required=True)
     parser.add_argument("--candidate-table", default="")
+    parser.add_argument("--public-gene-table", default="")
     parser.add_argument("--out-dir", required=True)
     args = parser.parse_args()
 
@@ -616,12 +641,13 @@ def main():
 
     candidate_path = find_candidate_table(args.candidate_table)
     candidates = read_candidates(candidate_path)
+    public_gene_table = read_public_gene_table(args.public_gene_table)
     if not candidates:
         # Keep the pipeline useful even before WES candidate tables are mounted.
         for gene in ["RPGR", "PDE6B", "RHO", "USH2A", "CRB1", "EYS", "RPE65"]:
             candidates.append({"family_id": "", "sample_id": "", "gene": gene, "variant": "", "classification": "", "conclusion": "fallback_seed", "source_row": "{}"})
 
-    gene_rows, variant_rows, evidence_rows = build_scores(candidates, dataset_gene_sets, status_map)
+    gene_rows, variant_rows, evidence_rows = build_scores(candidates, dataset_gene_sets, status_map, public_gene_table)
 
     write_tsv(out_dir / "read_check.tsv", dataset_summaries)
     write_tsv(out_dir / "gene_priority_ranking.tsv", gene_rows)

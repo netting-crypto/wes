@@ -13,6 +13,7 @@ heartbeat_interval="${SCRNA_HEARTBEAT_SECONDS:-300}"
 stall_seconds="${SCRNA_STALL_SECONDS:-1800}"
 download_retries="${SCRNA_DOWNLOAD_RETRIES:-2}"
 candidate_table="${SCRNA_WES_CANDIDATE_TABLE:-$project_dir/config/wes/company-family-targets.tsv}"
+public_gene_table="${SCRNA_PUBLIC_GENE_TABLE:-$project_dir/output/scrna/results/panelapp_retinal_disorders.tsv}"
 
 mkdir -p "$download_dir" "$summary_dir" "$log_dir" "$work_dir"
 
@@ -279,7 +280,23 @@ build_checks_and_ranking() {
     --download-dir "$download_dir" \
     --status "$status_file" \
     --candidate-table "$candidate_table" \
+    --public-gene-table "$public_gene_table" \
     --out-dir "$summary_dir"
+}
+
+build_public_gene_table() {
+  set_phase "public_gene_universe" "fetching public retinal gene universe"
+  local python_bin=""
+  if command -v python3 >/dev/null 2>&1; then
+    python_bin="python3"
+  elif command -v python >/dev/null 2>&1; then
+    python_bin="python"
+  else
+    echo "No Python interpreter available for public gene universe fetch" >&2
+    return 0
+  fi
+  "$python_bin" "$project_dir/scripts/fetch-panelapp-retinal-disorders.py" \
+    --out "$public_gene_table"
 }
 
 write_tree() {
@@ -309,6 +326,7 @@ write_tree() {
 }
 
 download_manifest
+build_public_gene_table
 build_checks_and_ranking
 write_tree
 set_phase "done" "RP scRNA prioritization finished"

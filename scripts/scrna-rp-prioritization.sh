@@ -169,43 +169,96 @@ download_manifest() {
     printf '%s\n' "$download_urls" > "$local_dataset_dir/download_urls.txt"
 
     IFS='|' read -r -a urls <<< "$download_urls"
-    dataset_status="failed"
+    IFS=';' read -r -a expected_files <<< "$expected_file"
+    dataset_status="downloaded"
     attempts=0
     message=""
 
-    for url in "${urls[@]}"; do
-      [[ -z "$url" ]] && continue
-      file_name="$(safe_filename_from_url "$url" "${dataset_id}.${file_type}")"
-      target="$local_dataset_dir/$file_name"
-
-      # HTML pages are accession metadata probes. They are useful but should not block downstream ranking.
-      if [[ "$file_type" == "html" ]]; then
-        target="$local_dataset_dir/${dataset_id}.metadata.html"
-      fi
-
-      for attempt in $(seq 1 "$download_retries"); do
-        attempts=$((attempts + 1))
-        log_path="$local_dataset_dir/download-${file_name}-attempt${attempt}.log"
-        echo "Downloading $dataset_id attempt=$attempt target=$target"
-        set +e
-        run_download_with_watchdog "$dataset_id" "$url" "$target" "$log_path"
-        status=$?
-        set -e
-        if [[ $status -eq 0 && -s "$target" ]]; then
-          dataset_status="downloaded"
-          message="downloaded $file_name"
-          break 2
-        fi
-        message="failed url=$url status=$status"
-        echo "[WARN] $message"
-      done
-    done
-
-    if [[ "$dataset_status" == "failed" ]]; then
-      record_status "$dataset_id" "failed" "$attempts" "" "" "$message"
-    else
-      record_status "$dataset_id" "$dataset_status" "$attempts" "" "" "$message"
+    required_count=1
+    if (( ${#expected_files[@]} > 1 )); then
+      required_count="${#expected_files[@]}"
     fi
+
+    if (( required_count > 1 && ${#urls[@]} != required_count )); then
+      dataset_status="failed"
+      message="expected_file/url count mismatch expected=${#expected_files[@]} urls=${#urls[@]}"
+      echo "[WARN] $message"
+      record_status "$dataset_id" "$dataset_status" "$attempts" "" "" "$message"
+      continue
+    fi
+
+    if (( required_count == 1 )); then
+      target_name="${expected_files[0]:-$(safe_filename_from_url "${urls[0]}" "${dataset_id}.${file_type}")}"
+      if [[ "$file_type" == "html" ]]; then
+        target_name="${dataset_id}.metadata.html"
+      fi
+      target="$local_dataset_dir/$target_name"
+
+      file_downloaded=0
+      for url in "${urls[@]}"; do
+        [[ -z "$url" ]] && continue
+        for attempt in $(seq 1 "$download_retries"); do
+          attempts=$((attempts + 1))
+          log_path="$local_dataset_dir/download-${target_name}-attempt${attempt}.log"
+          echo "Downloading $dataset_id attempt=$attempt target=$target"
+          set +e
+          run_download_with_watchdog "$dataset_id" "$url" "$target" "$log_path"
+          status=$?
+          set -e
+          if [[ $status -eq 0 && -s "$target" ]]; then
+            message="downloaded $target_name"
+            file_downloaded=1
+            break 2
+          fi
+          message="failed url=$url status=$status"
+          echo "[WARN] $message"
+        done
+      done
+
+      if (( file_downloaded == 0 )); then
+        dataset_status="failed"
+      fi
+    else
+      downloaded_files=0
+      failed_files=()
+      for idx in "${!urls[@]}"; do
+        url="${urls[$idx]}"
+        [[ -z "$url" ]] && continue
+        target_name="${expected_files[$idx]}"
+        [[ -z "$target_name" ]] && target_name="$(safe_filename_from_url "$url" "${dataset_id}_${idx}.${file_type}")"
+        target="$local_dataset_dir/$target_name"
+        file_downloaded=0
+
+        for attempt in $(seq 1 "$download_retries"); do
+          attempts=$((attempts + 1))
+          log_path="$local_dataset_dir/download-${target_name}-attempt${attempt}.log"
+          echo "Downloading $dataset_id file=$target_name attempt=$attempt target=$target"
+          set +e
+          run_download_with_watchdog "$dataset_id" "$url" "$target" "$log_path"
+          status=$?
+          set -e
+          if [[ $status -eq 0 && -s "$target" ]]; then
+            downloaded_files=$((downloaded_files + 1))
+            file_downloaded=1
+            break
+          fi
+          echo "[WARN] failed url=$url status=$status"
+        done
+
+        if (( file_downloaded == 0 )); then
+          failed_files+=("$target_name")
+        fi
+      done
+
+      if (( downloaded_files == required_count )); then
+        message="downloaded ${downloaded_files}/${required_count} required files"
+      else
+        dataset_status="failed"
+        message="missing required files: ${failed_files[*]}"
+      fi
+    fi
+
+    record_status "$dataset_id" "$dataset_status" "$attempts" "" "" "$message"
   done
 }
 

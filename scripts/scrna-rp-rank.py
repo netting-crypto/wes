@@ -187,10 +187,16 @@ def genes_from_tar(path):
                     members.append(member.name)
                     fileobj = tar.extractfile(member)
                     if fileobj:
-                        for i, raw in enumerate(fileobj):
+                        stream = fileobj
+                        if name.endswith(".gz"):
+                            stream = gzip.GzipFile(fileobj=fileobj)
+                        for i, raw in enumerate(stream):
                             if i > 300000:
                                 break
-                            line = raw.decode("utf-8", errors="ignore")
+                            if isinstance(raw, bytes):
+                                line = raw.decode("utf-8", errors="ignore")
+                            else:
+                                line = str(raw)
                             parts = line.rstrip("\n").split("\t")
                             for part in parts[:3]:
                                 add_gene(genes, part)
@@ -494,13 +500,24 @@ def build_interpretation(gene, cell_types, modules, disease_hits, downgrade):
 def write_degrade_report(path, manifest_rows, status_map, dataset_summaries, candidates, gene_rows):
     downloaded = [d for d, s in status_map.items() if s.get("status") == "downloaded"]
     failed = [d for d, s in status_map.items() if s.get("status") == "failed"]
-    available_disease = [d for d in downloaded if any(x in d.lower() for x in ("rpgr", "rd1", "rd10"))]
+    summary_by_dataset = {row["dataset_id"]: row for row in dataset_summaries}
+    manifest_by_dataset = {row.get("dataset_id", ""): row for row in manifest_rows}
+    usable_downloads = []
+    for dataset_id in downloaded:
+        summary = summary_by_dataset.get(dataset_id, {})
+        manifest = manifest_by_dataset.get(dataset_id, {})
+        file_type = clean(manifest.get("file_type", "")).lower()
+        gene_entries = int(summary.get("gene_entries", 0) or 0)
+        if file_type == "html":
+            continue
+        if gene_entries > 0:
+            usable_downloads.append(dataset_id)
 
-    if len(downloaded) >= len(manifest_rows) and gene_rows:
+    if len(usable_downloads) >= len(manifest_rows) and gene_rows:
         level = "complete"
-    elif all(any(key in d for d in downloaded) for key in ("rpgr", "rd1", "rd10")) and gene_rows:
+    elif all(any(key in d for d in usable_downloads) for key in ("rpgr", "rd1", "rd10")) and gene_rows:
         level = "degrade_1_rpgr_rd1_rd10"
-    elif any("rd1" in d for d in downloaded) and any("rd10" in d for d in downloaded) and gene_rows:
+    elif any("rd1" in d for d in usable_downloads) and any("rd10" in d for d in usable_downloads) and gene_rows:
         level = "degrade_2_mouse_models"
     else:
         level = "degrade_3_manifest_or_partial_download"
@@ -510,6 +527,7 @@ def write_degrade_report(path, manifest_rows, status_map, dataset_summaries, can
         "",
         f"- degrade_level: {level}",
         f"- downloaded_datasets: {', '.join(downloaded) if downloaded else 'none'}",
+        f"- usable_downloads: {', '.join(usable_downloads) if usable_downloads else 'none'}",
         f"- failed_datasets: {', '.join(failed) if failed else 'none'}",
         f"- candidate_rows: {len(candidates)}",
         f"- ranked_genes: {len(gene_rows)}",

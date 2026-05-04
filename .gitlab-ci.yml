@@ -90,7 +90,7 @@ scRNA_rp_prioritization:
     SCRNA_STALL_SECONDS: "1800"
     SLURM_JOB_NAME: "scrna-rp-prioritize"
     SLURM_PARTITION: "test"
-    SLURM_QOS: ""
+    SLURM_QOS: "qos_test"
     SLURM_NODES: "1"
     SLURM_NTASKS: "1"
     SLURM_CPUS_PER_TASK: "2"

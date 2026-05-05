@@ -2,6 +2,7 @@
 import argparse
 import csv
 import gzip
+import io
 import json
 import os
 import re
@@ -100,7 +101,7 @@ def write_tsv(path, rows, fieldnames=None):
                 if key not in keys:
                     keys.append(key)
         fieldnames = keys or ["message"]
-    with open(path, "w", encoding="utf-8", newline="") as handle:
+    with open(path, "w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter="\t", extrasaction="ignore")
         writer.writeheader()
         for row in rows:
@@ -217,6 +218,128 @@ def genes_from_text_file(path, limit=200000):
     except Exception:
         pass
     return genes
+
+
+def simplify_celltype_label(label):
+    label = clean(label).lower()
+    if not label:
+        return ""
+    if any(token in label for token in ("other", "others", "unknown", "unassigned")):
+        return ""
+    mapping = [
+        ("rod", ("rod", "rod pr")),
+        ("cone", ("cone", "cone pr")),
+        ("muller", ("mg", "muller", "müller")),
+        ("rpe", ("rpe",)),
+        ("amacrine", ("amacrine",)),
+        ("bipolar", ("bipolar",)),
+        ("rgc", ("rgc", "ganglion")),
+        ("microglia", ("microglia",)),
+        ("horizontal", ("horizontal",)),
+        ("astrocyte", ("astro", "astrocyte")),
+    ]
+    for cell_type, tokens in mapping:
+        if any(token in label for token in tokens):
+            return cell_type
+    if "pr" in label or "photoreceptor" in label:
+        return "photoreceptor"
+    return label.replace(" ", "_")
+
+
+def read_lukowski_celltype_map(dataset_dir):
+    dataset_dir = Path(dataset_dir)
+    barcode_map = {}
+    metadata_summary = defaultdict(set)
+    candidate_files = list(sorted(dataset_dir.glob("**/*cellbc*cellid*.csv")))
+    candidate_files.extend(sorted(dataset_dir.glob("**/*metadata*.csv")))
+    for path in candidate_files:
+        try:
+            with open(path, "r", encoding="utf-8", newline="") as handle:
+                reader = csv.DictReader(handle)
+                for row in reader:
+                    normalized = {clean(k): clean(v) for k, v in row.items()}
+                    barcode = normalized.get("cell.bc") or normalized.get("barcode") or normalized.get("cell.barcode") or normalized.get("cell_id")
+                    label = normalized.get("cell.id.cca") or normalized.get("cell.id") or normalized.get("cluster") or normalized.get("celltype") or normalized.get("cell_type")
+                    simple = simplify_celltype_label(label)
+                    if barcode and simple:
+                        barcode_map[barcode] = simple
+                    if simple and label:
+                        metadata_summary[simple].add(label)
+        except Exception:
+            continue
+    return barcode_map, metadata_summary
+
+
+def summarize_lukowski_expression(dataset_dir, genes_of_interest):
+    dataset_dir = Path(dataset_dir)
+    genes_of_interest = {upper_gene(g) for g in genes_of_interest if clean(g)}
+    if not genes_of_interest:
+        return {}, {}
+
+    barcode_map, metadata_summary = read_lukowski_celltype_map(dataset_dir)
+    matrix_candidates = sorted(dataset_dir.glob("**/lukowski_embo2019_raw_count_matrix.csv.gz*"))
+    if not matrix_candidates:
+        matrix_candidates = sorted(dataset_dir.glob("**/*raw_count_matrix*.csv.gz*"))
+    if not matrix_candidates:
+        return {}, {}
+
+    expression_support = {}
+    celltype_totals = defaultdict(int)
+    try:
+        with tarfile.open(matrix_candidates[0], "r:*") as tar:
+            member = next((m for m in tar.getmembers() if m.isfile() and m.name.lower().endswith(".csv")), None)
+            if member is None:
+                return {}, {}
+            fileobj = tar.extractfile(member)
+            if fileobj is None:
+                return {}, {}
+            wrapper = io.TextIOWrapper(fileobj, encoding="utf-8", newline="")
+            reader = csv.reader(wrapper)
+            barcodes = next(reader, [])
+            simple_types = [barcode_map.get(barcode, "") for barcode in barcodes]
+            for cell_type in simple_types:
+                if cell_type:
+                    celltype_totals[cell_type] += 1
+
+            for row in reader:
+                if not row:
+                    continue
+                gene = upper_gene(row[0])
+                if gene not in genes_of_interest:
+                    continue
+                counts = defaultdict(int)
+                for idx, value in enumerate(row[1:]):
+                    cell_type = simple_types[idx] if idx < len(simple_types) else ""
+                    if not cell_type:
+                        continue
+                    try:
+                        if float(value) > 0:
+                            counts[cell_type] += 1
+                    except Exception:
+                        continue
+                if not counts:
+                    continue
+                best_fraction = 0.0
+                supported_types = []
+                for cell_type, positive_cells in counts.items():
+                    total_cells = celltype_totals.get(cell_type, 0)
+                    fraction = (positive_cells / total_cells) if total_cells else 0.0
+                    if fraction > best_fraction:
+                        best_fraction = fraction
+                    if fraction >= 0.05:
+                        supported_types.append(cell_type)
+                expression_support[gene] = {
+                    "cell_types": sorted(set(supported_types)),
+                    "best_fraction": round(best_fraction, 4),
+                    "positive_cells_by_type": dict(sorted(counts.items())),
+                }
+    except Exception:
+        return {}, {}
+
+    return expression_support, {
+        "celltype_totals": dict(sorted(celltype_totals.items())),
+        "celltype_labels": {cell_type: sorted(labels)[:5] for cell_type, labels in sorted(metadata_summary.items())},
+    }
 
 
 def genes_from_tar(path):
@@ -405,10 +528,11 @@ def wes_score(row):
     return score
 
 
-def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_table):
+def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_table, dataset_expression_support=None):
     variant_rows = []
     evidence_rows = []
     gene_agg = {}
+    dataset_expression_support = dataset_expression_support or {}
 
     disease_dataset_ids = [d for d in dataset_gene_sets if any(x in d.lower() for x in ("rd1", "rd10", "rpgr"))]
     normal_dataset_ids = [d for d in dataset_gene_sets if "normal" in d.lower() or "nsr" in d.lower()]
@@ -421,6 +545,7 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
         normal_hits = [d for d in normal_dataset_ids if gene in dataset_gene_sets.get(d, set())]
         disease_hits = [d for d in disease_dataset_ids if gene in dataset_gene_sets.get(d, set())]
         any_hits = [d for d, genes in dataset_gene_sets.items() if gene in genes]
+        expression_hits = {d: dataset_expression_support.get(d, {}).get(gene, {}) for d in normal_dataset_ids if dataset_expression_support.get(d, {}).get(gene)}
         prior = GENE_CELL_PRIORS.get(gene)
         public_row = public_gene_table.get(gene, {})
         public_rp_related = public_row.get("rp_related", "") == "yes"
@@ -430,6 +555,8 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
             expression_score += 20
         if normal_hits:
             expression_score += 10
+        if expression_hits:
+            expression_score += 15
         if disease_hits:
             expression_score += 15 + 5 * min(len(disease_hits), 3)
         elif any_hits:
@@ -442,12 +569,20 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
             expression_score += 10
         if public_rp_related:
             expression_score += 10
+        best_expression_fraction = max((hit.get("best_fraction", 0.0) for hit in expression_hits.values()), default=0.0)
+        if best_expression_fraction >= 0.2:
+            expression_score += 10
+        elif best_expression_fraction >= 0.05:
+            expression_score += 5
+        expression_cell_types = sorted({cell_type for hit in expression_hits.values() for cell_type in hit.get("cell_types", [])})
 
         downgrade = []
         if not any_hits:
             downgrade.append("gene_not_observed_in_downloaded_matrices_or_supplements")
         if disease_hits and not normal_hits:
             downgrade.append("support_from_disease_model_only")
+        if normal_hits and not expression_hits:
+            downgrade.append("normal_dataset_present_but_no_celltype_expression_summary")
         if not cell_types:
             downgrade.append("no_marker_or_curated_cell_type_prior")
         if any("failed" == dataset_status.get(d, {}).get("status") for d in dataset_status):
@@ -463,6 +598,8 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
             "scrna_support_score": expression_score,
             "total_priority_score": total,
             "cell_type_support": ";".join(cell_types),
+            "normal_celltype_expression_support": ";".join(expression_cell_types),
+            "normal_best_expression_fraction": best_expression_fraction,
             "state_module_support": ";".join(modules),
             "normal_dataset_hits": ";".join(normal_hits),
             "disease_dataset_hits": ";".join(disease_hits),
@@ -485,6 +622,8 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
             "best_wes_score": 0,
             "best_scrna_support_score": 0,
             "cell_type_support": set(),
+            "normal_celltype_expression_support": set(),
+            "normal_best_expression_fraction": 0.0,
             "state_module_support": set(),
             "normal_dataset_hits": set(),
             "disease_dataset_hits": set(),
@@ -503,6 +642,8 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
         agg["best_wes_score"] = max(agg["best_wes_score"], base)
         agg["best_scrna_support_score"] = max(agg["best_scrna_support_score"], expression_score)
         agg["cell_type_support"].update(cell_types)
+        agg["normal_celltype_expression_support"].update(expression_cell_types)
+        agg["normal_best_expression_fraction"] = max(float(agg["normal_best_expression_fraction"]), float(best_expression_fraction))
         agg["state_module_support"].update(modules)
         agg["normal_dataset_hits"].update(normal_hits)
         agg["disease_dataset_hits"].update(disease_hits)
@@ -522,6 +663,8 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
             "sample_count": len(agg["samples"]),
             "family_ids": ";".join(sorted(agg["families"])),
             "cell_type_support": ";".join(sorted(agg["cell_type_support"])),
+            "normal_celltype_expression_support": ";".join(sorted(agg["normal_celltype_expression_support"])),
+            "normal_best_expression_fraction": agg["normal_best_expression_fraction"],
             "state_module_support": ";".join(sorted(agg["state_module_support"])),
             "normal_dataset_hits": ";".join(sorted(agg["normal_dataset_hits"])),
             "disease_dataset_hits": ";".join(sorted(agg["disease_dataset_hits"])),
@@ -622,12 +765,24 @@ def main():
     status_map = parse_download_status(args.status)
 
     dataset_gene_sets = {}
+    dataset_expression_support = {}
     dataset_summaries = []
     for row in manifest_rows:
         dataset_id = row.get("dataset_id", "")
         dataset_dir = Path(args.download_dir) / dataset_id
         genes, files, bytes_total, notes = inspect_dataset_files(dataset_dir)
         dataset_gene_sets[dataset_id] = genes
+        expression_meta = {}
+        if "lukowski" in dataset_id.lower():
+            candidate_path = find_candidate_table(args.candidate_table)
+            pre_candidates = read_candidates(candidate_path)
+            public_gene_table = read_public_gene_table(args.public_gene_table)
+            genes_of_interest = {row["gene"] for row in pre_candidates if row.get("gene")}
+            genes_of_interest.update(public_gene_table.keys())
+            expression_support, expression_meta = summarize_lukowski_expression(dataset_dir, genes_of_interest)
+            dataset_expression_support[dataset_id] = expression_support
+            if expression_meta.get("celltype_totals"):
+                notes.append(f"lukowski_celltypes={json.dumps(expression_meta['celltype_totals'], ensure_ascii=False)}")
         dataset_summaries.append({
             "dataset_id": dataset_id,
             "accession": row.get("accession", ""),
@@ -639,15 +794,15 @@ def main():
             "read_notes": " | ".join(notes),
         })
 
+    public_gene_table = read_public_gene_table(args.public_gene_table)
     candidate_path = find_candidate_table(args.candidate_table)
     candidates = read_candidates(candidate_path)
-    public_gene_table = read_public_gene_table(args.public_gene_table)
     if not candidates:
         # Keep the pipeline useful even before WES candidate tables are mounted.
         for gene in ["RPGR", "PDE6B", "RHO", "USH2A", "CRB1", "EYS", "RPE65"]:
             candidates.append({"family_id": "", "sample_id": "", "gene": gene, "variant": "", "classification": "", "conclusion": "fallback_seed", "source_row": "{}"})
 
-    gene_rows, variant_rows, evidence_rows = build_scores(candidates, dataset_gene_sets, status_map, public_gene_table)
+    gene_rows, variant_rows, evidence_rows = build_scores(candidates, dataset_gene_sets, status_map, public_gene_table, dataset_expression_support=dataset_expression_support)
 
     write_tsv(out_dir / "read_check.tsv", dataset_summaries)
     write_tsv(out_dir / "gene_priority_ranking.tsv", gene_rows)

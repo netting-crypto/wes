@@ -733,6 +733,71 @@ def parse_rd1_deg_support(dataset_dir):
     return normalized, notes
 
 
+def parse_rd10_deg_support(dataset_dir):
+    dataset_dir = Path(dataset_dir)
+    support = {}
+    notes = []
+    xlsx_files = sorted(dataset_dir.glob("*.xlsx")) or sorted(dataset_dir.glob("**/*.xlsx"))
+    for path in xlsx_files:
+        row_count = 0
+        matched_rows = 0
+        upper_name = path.name.upper()
+        if "MOESM4" in upper_name or "ADDITIONAL_FILE_4" in upper_name or "EARLY_RODS" in upper_name:
+            context = "rd10_rod_early_deg"
+            detail = "C02_vs_C01 early_deg_rods"
+            gene_idx = 0
+            logfc_idx = 2
+        elif "MOESM5" in upper_name or "ADDITIONAL_FILE_5" in upper_name or "LATE_RODS" in upper_name:
+            context = "rd10_rod_late_deg"
+            detail = "C03_vs_C02 late_deg_rods"
+            gene_idx = 0
+            logfc_idx = 2
+        elif "MOESM11" in upper_name or "ADDITIONAL_FILE_11" in upper_name or "CONES" in upper_name:
+            context = "rd10_cone_deg"
+            detail = "C04 rd10_vs_wt_cones"
+            gene_idx = 0
+            logfc_idx = 2
+        else:
+            continue
+
+        for _sheet_name, values in xlsx_sheet_rows(path):
+            if not values:
+                continue
+            row_count += 1
+            if row_count == 1:
+                continue
+            gene = upper_gene(values[gene_idx] if len(values) > gene_idx else "")
+            avg_log2fc = safe_float(values[logfc_idx] if len(values) > logfc_idx else 0)
+            if not gene or not re.fullmatch(r"[A-Z0-9_.-]{2,40}", gene):
+                continue
+            if abs(avg_log2fc) < 0.25:
+                continue
+            matched_rows += 1
+            direction = "up" if avg_log2fc > 0 else "down" if avg_log2fc < 0 else ""
+            entry = support.setdefault(gene, {
+                "contexts": set(),
+                "details": set(),
+                "directions": set(),
+                "max_abs_log2fc": 0.0,
+            })
+            entry["contexts"].add(context)
+            entry["details"].add(detail)
+            if direction:
+                entry["directions"].add(direction)
+            entry["max_abs_log2fc"] = max(float(entry["max_abs_log2fc"]), abs(avg_log2fc))
+        notes.append(f"{path.name}:deg_rows={row_count} matched={matched_rows}")
+
+    normalized = {}
+    for gene, entry in support.items():
+        normalized[gene] = {
+            "contexts": sorted(entry["contexts"]),
+            "details": sorted(entry["details"]),
+            "directions": sorted(entry["directions"]),
+            "max_abs_log2fc": round(entry["max_abs_log2fc"], 4),
+        }
+    return normalized, notes
+
+
 def inspect_dataset_files(dataset_dir):
     genes = set()
     notes = []
@@ -1103,6 +1168,11 @@ def main():
                 notes.extend(disease_notes)
         if "rd1" in dataset_id.lower():
             disease_support, disease_notes = parse_rd1_deg_support(dataset_dir)
+            dataset_disease_support[dataset_id] = disease_support
+            if disease_notes:
+                notes.extend(disease_notes)
+        if "rd10" in dataset_id.lower():
+            disease_support, disease_notes = parse_rd10_deg_support(dataset_dir)
             dataset_disease_support[dataset_id] = disease_support
             if disease_notes:
                 notes.extend(disease_notes)

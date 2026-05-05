@@ -1,173 +1,250 @@
-# USTC 综合科研仪器共享平台自动化
+# WES 解释增强工具
 
-这个仓库现在按 Slurm 队列模式执行：
+这是一个面向 **WES 候选解释增强** 的本地 CLI 工具。  
+它的目标不是替代标准 WES 主流水线，而是在候选变异初筛之后，把：
 
-- 本机写代码并 `git push` 到 GitLab
-- GitLab shell runner 只负责在登录节点提交 `sbatch`
-- 真正的任务在 Slurm 计算节点里执行
-- 任务结束后自动产出 Excel、`summary.json`、`summary.md`、`summary.html`
-- 在 GitLab Job 的 `Artifacts` 里下载结果和 Slurm 日志
+- 已知疾病基因证据
+- 表型匹配证据
+- 组织 / 单细胞表达证据
+- 疾病模型扰动证据
+- 共表达 / 网络支持证据
 
-## 当前执行链路
+整合成统一的排序结果、报告摘要和交互式网站。
 
-1. 你在本地提交代码到 GitLab
-2. GitLab 触发项目里的 `run_task`
-3. Runner 在登录节点执行 `bash scripts/ci-submit-slurm.sh`
-4. `ci-submit-slurm.sh` 提交 `scripts/slurm-job.sh` 到 Slurm
-5. Slurm 作业在计算节点里执行 `npm ci`、`npx playwright install chromium`、`npm run pipeline`
-6. 结果写回 `output/reports/`，GitLab 再把它作为 artifacts 保存
+当前仓库已经把 **RP / IRD** 作为第一套示例 profile 跑通，但工具本身是按 **profile 驱动** 设计的，后续可以按同一 schema 扩展到其他疾病。
 
-## Runner 在线方式
+---
 
-你现在的 runner 是 user-mode。它在线时需要在服务器上保持一个常驻进程：
+## 工具结构
 
-```bash
-cd ~/00soft/github_runner
-nohup ./gitlab-runner run > runner.log 2>&1 &
-```
+当前这套工具链分成 3 层：
 
-检查是否在线：
+1. **标准 WES 主线**
+   - 负责 FASTQ、比对、变异检测、基础注释
+   - 现有脚本和流水线仍保留在仓库里
 
-```bash
-./gitlab-runner verify
-```
+2. **解释增强层**
+   - 读取候选变异 / 候选基因表
+   - 读取疾病 profile 定义的数据清单与公共基因证据
+   - 调用单细胞 / 疾病模型打分脚本
+   - 输出排序结果与解释摘要
 
-如果你只想前台观察日志，也可以直接运行：
+3. **展示层**
+   - 从排序结果构建交互式网站
+   - 供浏览、汇报和后续筛选使用
 
-```bash
-./gitlab-runner run
-```
+---
 
-## GitLab CI 需要的输入
+## 当前已经打通的示例 profile
 
-### 1. 登录态
+### `rp_ird`
 
-先在本机执行：
+示例 profile 位于：
 
-```powershell
-npm.cmd run capture-auth
-```
+- `config/tool-profiles/rp_ird.json`
 
-生成 `data/storage-state.json` 后，把文件全文保存到 GitLab CI/CD Variable：
+它当前整合的数据包括：
 
-- 变量名：`STORAGE_STATE_JSON`
+- 正常成人视网膜单细胞：`Lukowski_EMBO_2019`
+- RPGR 突变视网膜类器官：`SRP535874`
+- rd1 小鼠视网膜：`GSE212183`
+- rd10 小鼠视网膜：`GSE183206`
+- 候选输入：`config/wes/company-analysis-results.tsv`
+- 公共已知基因：`PanelApp retinal disorders`
 
-流水线开始时会自动把它写回 `data/storage-state.json`。
+---
 
-### 2. Excel 模板
+## CLI 用法
 
-把模板 Excel 文件提交到仓库的 `templates/` 目录。
-
-默认会从这里读取模板：
-
-- [templates](C:/Users/witch/Documents/Playground/templates)
-
-### 3. Slurm 参数
-
-下面这些变量可以直接在 GitLab CI/CD Variables 里配置：
-
-- `SLURM_PARTITION`：指定分区
-- `SLURM_ACCOUNT`：指定账户
-- `SLURM_QOS`：指定 qos
-- `SLURM_TIME`：任务时限，默认 `02:00:00`
-- `SLURM_CPUS_PER_TASK`：默认 `2`
-- `SLURM_MEM`：默认 `4G`
-- `SLURM_EXTRA_ARGS`：额外 `sbatch` 参数
-- `SLURM_ENV_SETUP`：任务启动前执行的环境初始化命令
-
-如果你的集群需要先加载模块或 conda，再跑 Node，可以把它写到 `SLURM_ENV_SETUP`，例如：
+### 1. 查看 profile 配置
 
 ```bash
-source ~/.bashrc && conda activate base
+python -m wes_enhancer.cli show-profile --profile config/tool-profiles/rp_ird.json
 ```
 
-或者：
+### 2. 运行完整解释增强链路
 
 ```bash
-source /etc/profile && module load nodejs
+python -m wes_enhancer.cli run --profile config/tool-profiles/rp_ird.json --build-site
 ```
 
-### 4. 可选跳过项
+这个命令会：
 
-如果服务器环境已经准备好依赖，可以设置：
+1. 读取 profile
+2. 调用现有排序脚本生成结果
+3. 输出运行摘要
+4. 可选构建交互式网站
 
-- `SKIP_NPM_CI=1`
-- `SKIP_PLAYWRIGHT_INSTALL=1`
+默认输出目录：
 
-## 本地使用
+- `output/tool-runs/rp_ird_demo/`
 
-安装依赖：
+### 3. 只从已有结果构建网站
 
-```powershell
-npm.cmd install
-npx.cmd playwright install chromium
+```bash
+python -m wes_enhancer.cli build-site ^
+  --profile config/tool-profiles/rp_ird.json ^
+  --results-dir output/tool-runs/rp_ird_demo/results ^
+  --site-dir output/tool-runs/rp_ird_demo/wes-evidence-explorer
 ```
 
-首次保存登录态：
+---
 
-```powershell
-npm.cmd run capture-auth
+## 网站输出
+
+当前网站是工具链的一个输出，而不是工具本体。
+
+网站可展示：
+
+- 正常视网膜 UMAP 聚类图
+- 基因优先级排序
+- 变异优先级排序
+- 三评分热图
+- 疾病模型覆盖热图
+- 共表达模块与疾病投影
+- 数据处理流程
+
+示例入口：
+
+- `site/rp-scrna-explorer/index.html`
+
+或者运行后查看 profile 输出目录下的网站。
+
+---
+
+## 关键输出文件
+
+一次完整运行后，核心结果包括：
+
+- `gene_priority_ranking.tsv`：基因级优先级排序
+- `variant_priority_ranking.tsv`：变异级优先级排序
+- `evidence_breakdown.tsv`：证据拆解明细
+- `network_module_summary.tsv`：网络模块汇总
+- `summary.json`：结果摘要
+- `run_report.md`：本次 CLI 运行摘要
+- `run_summary.json`：本次 CLI 的结构化元信息
+- 网站目录：交互式展示站点
+
+---
+
+## RP / IRD 示例中的三评分
+
+当前示例 profile 的核心是 3 个解释增强评分：
+
+1. **正常细胞类型评分**
+   - 候选基因在正常人视网膜关键细胞类型中的表达支持
+
+2. **疾病模型评分**
+   - 候选基因在 RPGR / rd1 / rd10 模型中的扰动证据
+
+3. **网络支持评分**
+   - 正常视网膜共表达模块归属
+   - 模块细胞类型主导关系
+   - 模块在疾病模型中的整体扰动支持
+
+---
+
+## 当前目录里的关键脚本
+
+### 解释增强排序
+
+- `scripts/scrna-rp-rank.py`
+
+负责：
+
+- 读取 manifest
+- 汇总正常表达支持
+- 汇总疾病模型扰动支持
+- 汇总网络模块支持
+- 输出基因级和变异级排序
+
+### 网站构建
+
+- `scripts/build_scrna_explorer.py`
+
+负责：
+
+- 读取结果目录
+- 生成站点所需数据资产
+- 构建正常视网膜 UMAP 展示点
+- 生成可直接打开的静态网站
+
+### 工具 CLI
+
+- `wes_enhancer/cli.py`
+
+负责：
+
+- 读取 profile
+- 调用现有排序脚本
+- 组织输出目录
+- 生成运行摘要
+- 触发网站构建
+
+---
+
+## NPM 快捷命令
+
+### 构建网站
+
+```bash
+npm run scrna-site:build
 ```
 
-执行主任务：
+### 本地预览网站
 
-```powershell
-npm.cmd run
+```bash
+npm run scrna-site:serve
 ```
 
-只生成报告：
+### 运行示例 profile
 
-```powershell
-npm.cmd run report
+```bash
+npm run wes-tool:demo
 ```
 
-完整跑一遍任务并生成报告：
+---
 
-```powershell
-npm.cmd run pipeline
+## 软件截图
+
+### 总览页
+
+![总览页](docs/screenshots/overview.png)
+
+### 基因排序页
+
+![基因排序页](docs/screenshots/genes.png)
+
+### 网络模块页
+
+![网络模块页](docs/screenshots/modules.png)
+
+### 数据流程页
+
+![数据流程页](docs/screenshots/workflow.png)
+
+---
+
+## 依赖
+
+Python 侧站点构建依赖：
+
+```bash
+pip install -r requirements-scrna-site.txt
 ```
 
-## 输出结果
+---
 
-默认输出目录是 `output/reports/`，其中包含：
+## 设计说明
 
-- `summary.json`：完整原始汇总数据
-- `stats.json`：统计摘要
-- `summary.md`：简版文字结果
-- `summary.html`：可直接打开看的图表报告
-- 多个 `.xlsx`：按记录导出的 Excel
+这套仓库当前采用的是 **“薄 CLI + 复用既有脚本 + profile 驱动”** 的结构，而不是重写全部分析逻辑。这样做的原因是：
 
-Slurm 相关日志会写到：
+- 现有 RP 结果链已经验证过
+- 根因不在算法缺失，而在缺少统一工具入口
+- 最短路径是把现有脚本收成一个可复用工具，而不是推倒重做
 
-- `output/slurm/`
+因此当前版本的重点是：
 
-## WES 试跑骨架
-
-仓库里新增了一套适合小型家系 WES 首次试跑的骨架：
-
-- `README-WES.md`
-- `pipelines/wes-germline.sh`
-- `scripts/wes-check-server.sh`
-- `config/wes/run.env.example`
-- `config/wes/samples.example.tsv`
-
-建议先跑服务器检查脚本，再做单样本 smoke test。
-
-## 已支持的环境变量
-
-- `OUTPUT_DIR`：覆盖输出目录
-- `TEMPLATE_DIR`：覆盖 Excel 模板目录
-- `STORAGE_STATE_PATH`：覆盖登录态文件路径
-- `HEADLESS`：默认 `1`，服务器上无头运行；设成 `0` 可显示浏览器
-- `CHROME_PATH`：如果你要复用系统 Chrome，可指定浏览器路径
-- `START_PAGE`：从第几页开始处理，默认 `1`
-- `END_PAGE`：处理到第几页，默认 `0` 表示到最后一页
-
-## 首次联调时你需要核对
-
-因为页面结构仍然依赖真实站点，首次跑通后请重点核对 [config/selectors.json](C:/Users/witch/Documents/Playground/config/selectors.json)：
-
-1. 列表页每行的“编辑”按钮选择器
-2. 锁定状态字段对应的文本
-3. 编辑页“测试内容”输入框选择器
-4. 保存后两个弹窗的关闭方式
+- 把工具链真正串起来
+- 让网站成为标准输出之一
+- 让新增疾病时只需要补 profile 和数据，而不是重写整套代码

@@ -1,18 +1,24 @@
 {
-    "name":  "ustc-lfsms-automation",
-    "version":  "0.1.0",
-    "private":  true,
-    "description":  "Automation for USTC instrument platform test record updates and Excel generation.",
-    "type":  "module",
-    "scripts":  {
-                    "capture-auth":  "node scripts/capture-auth.js",
-                    "run":  "node scripts/run.js",
-                    "report":  "node scripts/report.js",
-                    "pipeline":  "npm run run \u0026\u0026 npm run report",
-                    "wes-qc":  "node scripts/wes-qc-report.js"
-                },
-    "dependencies":  {
-                         "exceljs":  "^4.4.0",
-                         "playwright":  "^1.52.0"
-                     }
+  "name": "wes-interpretation-enhancer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "面向疾病解释增强的 WES CLI 工具与交互式网站输出",
+  "type": "module",
+  "scripts": {
+    "capture-auth": "node scripts/capture-auth.js",
+    "run": "node scripts/run.js",
+    "report": "node scripts/report.js",
+    "pipeline": "npm run run && npm run report",
+    "wes-qc": "node scripts/wes-qc-report.js",
+    "wes-feishu-bot": "node scripts/feishu-wes-bot.js",
+    "scrna-site:build": "python scripts/build_scrna_explorer.py",
+    "scrna-site:serve": "python -m http.server 4173 -d site/rp-scrna-explorer",
+    "wes-tool:demo": "python -m wes_enhancer.cli run --profile config/tool-profiles/rp_ird.json --build-site",
+    "wes-tool:profile": "python -m wes_enhancer.cli show-profile --profile config/tool-profiles/rp_ird.json"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.59.0",
+    "exceljs": "^4.4.0",
+    "playwright": "^1.52.0"
+  }
 }

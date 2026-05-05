@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RP 单细胞证据网站</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">RP</div>
+          <div>
+            <p class="eyebrow">视网膜单细胞</p>
+            <h1>证据站点</h1>
+          </div>
+        </div>
+        <nav class="nav">
+          <button class="nav-link is-active" data-section="overview">总览</button>
+          <button class="nav-link" data-section="genes">基因排序</button>
+          <button class="nav-link" data-section="variants">变异排序</button>
+          <button class="nav-link" data-section="modules">网络模块</button>
+          <button class="nav-link" data-section="workflow">数据流程</button>
+        </nav>
+      </aside>
+
+      <main class="content">
+        <section class="hero">
+          <div class="hero-copy">
+            <p class="eyebrow">交互式科研展示</p>
+            <h2>RP / IRD 单细胞证据探索网站</h2>
+            <div class="hero-tag">单细胞 · 视网膜</div>
+            <p class="hero-text">
+              把正常人视网膜表达、RPGR 类器官扰动、rd1 / rd10 疾病模型证据和共表达网络支持，放进同一个可浏览的界面里。
+            </p>
+          </div>
+          <div class="hero-panel">
+            <svg id="hero-network" viewBox="0 0 520 420" aria-label="首页主视觉"></svg>
+          </div>
+        </section>
+
+        <section class="metrics-band" id="overview-metrics"></section>
+
+        <section class="section is-active" id="section-overview">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">总览</p>
+              <h3>数据覆盖与核心信号</h3>
+            </div>
+          </div>
+          <div class="overview-grid">
+            <article class="panel wide">
+              <div class="panel-head">
+                <h4>正常人视网膜 UMAP 聚类图</h4>
+                <span class="pill">可交互聚类视图</span>
+              </div>
+              <div class="umap-layout">
+                <div class="umap-stage">
+                  <svg id="umap-plot" viewBox="0 0 1000 680" aria-label="正常人视网膜 UMAP"></svg>
+                </div>
+                <div class="umap-side">
+                  <div class="umap-summary" id="umap-summary"></div>
+                  <div class="umap-legend" id="umap-legend"></div>
+                </div>
+              </div>
+            </article>
+            <article class="panel">
+              <div class="panel-head">
+                <h4>数据集构成</h4>
+                <span class="pill">4 组整合数据</span>
+              </div>
+              <div class="dataset-list" id="dataset-list"></div>
+            </article>
+            <article class="panel">
+              <div class="panel-head">
+                <h4>综合优先级 Top 基因</h4>
+                <span class="pill">前 12 个</span>
+              </div>
+              <div class="bar-chart" id="top-gene-chart"></div>
+            </article>
+            <article class="panel wide">
+              <div class="panel-head">
+                <h4>当前阶段结论</h4>
+                <span class="pill">可直接汇报</span>
+              </div>
+              <div class="finding-list" id="key-findings"></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="section-genes">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">核心结果</p>
+              <h3>基因排序与证据拆解</h3>
+            </div>
+            <label class="search">
+              <span>搜索</span>
+              <input id="gene-search" type="search" placeholder="ABCA4 / RPGR / RHO..." />
+            </label>
+          </div>
+          <div class="explorer-grid">
+            <article class="panel">
+              <div class="panel-head">
+                <h4>基因总表</h4>
+                <div class="segmented">
+                  <button class="seg-btn is-active" data-sort="best_total_priority_score">总分</button>
+                  <button class="seg-btn" data-sort="best_normal_celltype_score">正常</button>
+                  <button class="seg-btn" data-sort="best_disease_model_score">疾病</button>
+                  <button class="seg-btn" data-sort="best_network_support_score">网络</button>
+                </div>
+              </div>
+              <div class="data-table-wrap">
+                <table class="data-table" id="gene-table">
+                  <thead>
+                    <tr>
+                      <th>基因</th>
+                      <th>总分</th>
+                      <th>正常</th>
+                      <th>疾病</th>
+                      <th>网络</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </article>
+            <article class="panel detail-panel">
+              <div id="gene-detail"></div>
+              <div class="detail-section">
+                <div class="panel-head compact">
+                  <h4>三评分热图</h4>
+                  <span class="pill">前 20 基因</span>
+                </div>
+                <svg id="score-heatmap" viewBox="0 0 760 460" aria-label="三评分热图"></svg>
+              </div>
+              <div class="detail-section">
+                <div class="panel-head compact">
+                  <h4>疾病模型覆盖热图</h4>
+                  <span class="pill">RPGR / rd1 / rd10</span>
+                </div>
+                <svg id="model-heatmap" viewBox="0 0 760 460" aria-label="疾病模型覆盖热图"></svg>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="section-variants">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">候选变异</p>
+              <h3>变异排序</h3>
+            </div>
+          </div>
+          <div class="overview-grid">
+            <article class="panel">
+              <div class="panel-head">
+                <h4>候选变异表</h4>
+                <span class="pill">前 20 条</span>
+              </div>
+              <div class="data-table-wrap short">
+                <table class="data-table" id="variant-table">
+                  <thead>
+                    <tr>
+                      <th>基因</th>
+                      <th>变异</th>
+                      <th>家系</th>
+                      <th>总分</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </article>
+            <article class="panel">
+              <div class="panel-head">
+                <h4>变异详情</h4>
+                <span class="pill">证据视图</span>
+              </div>
+              <div id="variant-detail"></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="section-modules">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">网络层</p>
+              <h3>共表达模块与疾病投影</h3>
+            </div>
+          </div>
+          <div class="modules-grid">
+            <article class="panel module-visual">
+              <div class="panel-head">
+                <h4>模块比较图</h4>
+                <span class="pill">可交互</span>
+              </div>
+              <svg id="module-chart" viewBox="0 0 920 520" aria-label="模块比较图"></svg>
+            </article>
+            <article class="panel">
+              <div class="panel-head">
+                <h4>模块详情</h4>
+                <span class="pill">联动说明</span>
+              </div>
+              <div id="module-cards" class="module-cards"></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="section-workflow">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">方法链路</p>
+              <h3>从原始数据到最终排序</h3>
+            </div>
+          </div>
+          <div class="workflow-grid">
+            <article class="panel workflow-panel">
+              <div id="workflow-steps" class="workflow-steps"></div>
+            </article>
+            <article class="panel">
+              <div class="panel-head">
+                <h4>数据与评分映射矩阵</h4>
+                <span class="pill">交互式矩阵</span>
+              </div>
+              <svg id="workflow-matrix" viewBox="0 0 920 520" aria-label="流程矩阵"></svg>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./assets/site-data.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

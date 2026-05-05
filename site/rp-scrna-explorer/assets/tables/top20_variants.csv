@@ -1,0 +1,21 @@
+﻿gene,family_id,sample_id,variant,total_score,normal_score,disease_score,network_score,network_module,disease_models,classification,conclusion
+ABCA4,R-11王某花,2003691S1,c.5761G>A(p.Val1921Met),205,55,60,35,normal_module_01,rd10_retina_gse183206;rd1_retina_gse212183;rpgr_organoid_srp535874,PAT,临床意义不明确
+RDH12,徐昌友,2304978S1,c.184C>T(p.Arg62Ter),205,55,60,35,normal_module_01,rd10_retina_gse183206;rd1_retina_gse212183;rpgr_organoid_srp535874,PAT,临床意义不明确
+USH2A,柯艺涵,2400376S1,c.2802T>G(p.Cys934Trp),205,55,60,35,normal_module_01,rd10_retina_gse183206;rd1_retina_gse212183;rpgr_organoid_srp535874,PAT,临床意义不明确
+EYS,R-29,2103014S1,c.6416G>A(p.Cys2139Tyr),195,55,50,35,normal_module_01,rd10_retina_gse183206;rd1_retina_gse212183;rpgr_organoid_srp535874,PAT,临床意义不明确
+ABCA4,R-10张xx,2003334S1,c.101_106del(p.Ser34_Leu35del),190,55,60,35,normal_module_01,rd10_retina_gse183206;rd1_retina_gse212183;rpgr_organoid_srp535874,PAT,阳性
+ABCA4,丁晓枫,2302739S1,c.101_106del(p.Ser34_Leu35del),190,55,60,35,normal_module_01,rd10_retina_gse183206;rd1_retina_gse212183;rpgr_organoid_srp535874,PAT,阳性
+ABCA4,丁晓枫,2302739S1,c.1820G>A(p.Gly607Glu),190,55,60,35,normal_module_01,rd10_retina_gse183206;rd1_retina_gse212183;rpgr_organoid_srp535874,PAT,阳性
+ABCA4,R-25,2101971S1,c.1958G>A(p.Arg653His),190,55,60,35,normal_module_01,rd10_retina_gse183206;rd1_retina_gse212183;rpgr_organoid_srp535874,PAT,阳性
+ABCA4,R-5,1908227S1,c.203C>T(p.Pro68Leu),190,55,60,35,normal_module_01,rd10_retina_gse183206;rd1_retina_gse212183;rpgr_organoid_srp535874,PAT,阳性
+ABCA4,高岩,2401530S1,c.4383G>A(p.Trp1461Ter),190,55,60,35,normal_module_01,rd10_retina_gse183206;rd1_retina_gse212183;rpgr_organoid_srp535874,PAT,阳性
+ABCA4,R-10张xx,2003334S1,c.5327C>T(p.Pro1776Leu),190,55,60,35,normal_module_01,rd10_retina_gse183206;rd1_retina_gse212183;rpgr_organoid_srp535874,PAT,阳性
+ABCA4,任祥宁,2301280S1,c.6319C>T(p.Arg2107Cys),190,55,60,35,normal_module_01,rd10_retina_gse183206;rd1_retina_gse212183;rpgr_organoid_srp535874,PAT,阳性
+CNGA1,吕雷,2402325S1,c.1528C>T(p.Arg510Ter),190,55,60,35,normal_module_01,rd10_retina_gse183206;rd1_retina_gse212183;rpgr_organoid_srp535874,PAT,阳性
+CNGA1,吕雷,2402325S1,c.253del(p.Leu85PhefsTer4),190,55,60,35,normal_module_01,rd10_retina_gse183206;rd1_retina_gse212183;rpgr_organoid_srp535874,PAT,阳性
+CRB1,R-17朱某1,2004360S1,c.1576C>T (p.Arg526Ter),190,55,60,35,normal_module_01,rd10_retina_gse183206;rd1_retina_gse212183;rpgr_organoid_srp535874,PAT,阳性
+CRB1,R-16,2004357S1,c.3023T>C(p.Leu1008Ser),190,55,60,35,normal_module_01,rd10_retina_gse183206;rd1_retina_gse212183;rpgr_organoid_srp535874,PAT,阳性
+IMPG2,R-25,2101971S1,c.1589C>A(p.Ser530Ter),190,55,60,35,normal_module_01,rd10_retina_gse183206;rd1_retina_gse212183;rpgr_organoid_srp535874,PAT,阳性
+IMPG2,R-25,2101971S1,c.2680C>T(p.Gln894Ter),190,55,60,35,normal_module_01,rd10_retina_gse183206;rd1_retina_gse212183;rpgr_organoid_srp535874,PAT,阳性
+MAK,R-34,2104621S1,c.1705_1708del(p.Ser569AspfsTer20),190,55,60,35,normal_module_01,rd10_retina_gse183206;rd1_retina_gse212183;rpgr_organoid_srp535874,PAT,阳性
+NRL,石玉峰,2301046S1,c.91C>T(p.Arg31Ter),190,55,60,35,normal_module_01,rd10_retina_gse183206;rd1_retina_gse212183;rpgr_organoid_srp535874,PAT,阳性

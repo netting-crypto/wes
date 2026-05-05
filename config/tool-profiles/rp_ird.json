@@ -1,0 +1,14 @@
+{
+  "profile_id": "rp_ird",
+  "disease_name": "RP / IRD",
+  "title": "WES 解释增强工具 - RP / IRD 示例 profile",
+  "description": "以 RP / IRD 为例，把 WES 候选输入、单细胞证据、疾病模型扰动和网络支持整合成统一解释增强输出。",
+  "manifest": "config/scrna/rp_manifest.tsv",
+  "download_dir": "output/scrna-local/finalscore-rd10-validation",
+  "download_status": "output/scrna-local/finalscore-rd10-validation/download_status.tsv",
+  "candidate_table": "config/wes/company-analysis-results.tsv",
+  "public_gene_table": "output/scrna-local/finalscore-rd10-validation/panelapp.tsv",
+  "normal_retina_dir": "output/scrna-local/finalscore-rd10-validation/normal_human_retina_lukowski_zenodo",
+  "default_out_root": "output/tool-runs/rp_ird_demo",
+  "site_slug": "wes-evidence-explorer"
+}

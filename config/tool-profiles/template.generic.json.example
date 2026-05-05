@@ -1,0 +1,14 @@
+{
+  "profile_id": "example_disease",
+  "disease_name": "示例疾病名称",
+  "title": "WES 解释增强工具 - 示例疾病 profile",
+  "description": "把该疾病的候选输入、公共疾病基因证据、组织或单细胞表达证据、疾病模型扰动证据整合成统一解释增强输出。",
+  "manifest": "config/your-disease/manifest.tsv",
+  "download_dir": "output/your-disease/downloads",
+  "download_status": "output/your-disease/download_status.tsv",
+  "candidate_table": "config/your-disease/candidates.tsv",
+  "public_gene_table": "config/your-disease/public_genes.tsv",
+  "normal_retina_dir": "",
+  "default_out_root": "output/tool-runs/example_disease_demo",
+  "site_slug": "wes-evidence-explorer"
+}

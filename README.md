@@ -1,6 +1,7 @@
 # WES 解释增强工具
 
-这是一个面向 **WES 候选解释增强** 的本地 CLI 工具。  
+这是一个面向 **WES 候选解释增强** 的本地 CLI 工具。
+
 它的目标不是替代标准 WES 主流水线，而是在候选变异初筛之后，把：
 
 - 已知疾病基因证据
@@ -9,7 +10,7 @@
 - 疾病模型扰动证据
 - 共表达 / 网络支持证据
 
-整合成统一的排序结果、报告摘要和交互式网站。
+整合成统一的排序结果、运行摘要和交互式网站。
 
 当前仓库已经把 **RP / IRD** 作为第一套示例 profile 跑通，但工具本身是按 **profile 驱动** 设计的，后续可以按同一 schema 扩展到其他疾病。
 
@@ -20,7 +21,7 @@
 当前这套工具链分成 3 层：
 
 1. **标准 WES 主线**
-   - 负责 FASTQ、比对、变异检测、基础注释
+   - 负责 FASTQ、质控、比对、变异检测和基础注释
    - 现有脚本和流水线仍保留在仓库里
 
 2. **解释增强层**
@@ -31,7 +32,7 @@
 
 3. **展示层**
    - 从排序结果构建交互式网站
-   - 供浏览、汇报和后续筛选使用
+   - 用于浏览、汇报和后续筛选
 
 ---
 
@@ -104,11 +105,23 @@ python -m wes_enhancer.cli build-site ^
 - 共表达模块与疾病投影
 - 数据处理流程
 
-示例入口：
+### 仓库自带示例网站
+
+为了让工具开箱即可演示，仓库里保留了一份已经构建好的示例网站：
 
 - `site/rp-scrna-explorer/index.html`
 
-或者运行后查看 profile 输出目录下的网站。
+这份示例网站当前基于 `rp_ird` profile 的本地验证结果生成，作用是：
+
+- 作为 README 与 GitHub 仓库中的可见 demo
+- 让使用者在不重新跑完整链路时先体验交互形式
+- 作为后续新 disease profile 网站输出的版式参考
+
+如果需要严格复现这份示例网站，建议重新执行：
+
+```bash
+python -m wes_enhancer.cli run --profile config/tool-profiles/rp_ird.json --build-site
+```
 
 ---
 
@@ -180,6 +193,24 @@ python -m wes_enhancer.cli build-site ^
 - 组织输出目录
 - 生成运行摘要
 - 触发网站构建
+
+### profile 配置
+
+- `config/tool-profiles/rp_ird.json`
+- `config/tool-profiles/template.generic.json.example`
+
+其中：
+
+- `rp_ird.json` 是当前已经跑通的示例 profile
+- `template.generic.json.example` 是给其他疾病复用的通用模板
+
+后续切换到新的疾病时，优先复制模板并替换：
+
+- 候选输入表
+- 公共疾病基因表
+- 单细胞 / 组织 / 疾病模型 manifest
+- 输出目录
+- 正常参考表达数据目录
 
 ---
 

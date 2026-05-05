@@ -359,6 +359,283 @@ def summarize_lukowski_expression(dataset_dir, genes_of_interest):
     }
 
 
+def select_lukowski_matrix_path(dataset_dir):
+    dataset_dir = Path(dataset_dir)
+    matrix_candidates = sorted(dataset_dir.glob("**/lukowski_embo2019_raw_count_matrix.csv.gz*"))
+    if not matrix_candidates:
+        matrix_candidates = sorted(dataset_dir.glob("**/*raw_count_matrix*.csv.gz*"))
+    return matrix_candidates[0] if matrix_candidates else None
+
+
+def read_lukowski_selected_matrix(dataset_dir, genes_of_interest, max_cells_per_type=1200):
+    dataset_dir = Path(dataset_dir)
+    genes_of_interest = {upper_gene(g) for g in genes_of_interest if clean(g)}
+    if not genes_of_interest:
+        return {}, [], {}, {}
+
+    barcode_map, _metadata_summary = read_lukowski_celltype_map(dataset_dir)
+    matrix_path = select_lukowski_matrix_path(dataset_dir)
+    if matrix_path is None:
+        return {}, [], {}, {}
+
+    import numpy as np  # type: ignore
+
+    selected_indices = []
+    selected_cell_types = []
+    celltype_counts = defaultdict(int)
+    celltype_by_index = {}
+    celltype_vectors = defaultdict(list)
+    gene_vectors = {}
+    gene_celltype_means = {}
+
+    with tarfile.open(matrix_path, "r:*") as tar:
+        member = next((m for m in tar.getmembers() if m.isfile() and m.name.lower().endswith(".csv")), None)
+        if member is None:
+            return {}, [], {}, {}
+        fileobj = tar.extractfile(member)
+        if fileobj is None:
+            return {}, [], {}, {}
+        wrapper = io.TextIOWrapper(fileobj, encoding="utf-8", newline="")
+        reader = csv.reader(wrapper)
+        header = next(reader, [])
+        for idx, barcode in enumerate(header[1:]):
+            cell_type = barcode_map.get(barcode, "")
+            if not cell_type:
+                continue
+            if celltype_counts[cell_type] >= max_cells_per_type:
+                continue
+            celltype_counts[cell_type] += 1
+            selected_indices.append(idx)
+            selected_cell_types.append(cell_type)
+            celltype_by_index[idx] = cell_type
+        for row in reader:
+            if not row:
+                continue
+            gene = upper_gene(row[0])
+            if gene not in genes_of_interest:
+                continue
+            vector = np.zeros(len(selected_indices), dtype=np.float32)
+            for pos, idx in enumerate(selected_indices):
+                value = row[idx + 1] if idx + 1 < len(row) else ""
+                vector[pos] = safe_float(value)
+                celltype_vectors[selected_cell_types[pos]].append(vector[pos])
+            gene_vectors[gene] = np.log1p(vector)
+
+    for gene, vector in gene_vectors.items():
+        per_type = {}
+        for cell_type in sorted(set(selected_cell_types)):
+            type_positions = [i for i, label in enumerate(selected_cell_types) if label == cell_type]
+            if not type_positions:
+                continue
+            values = vector[type_positions]
+            per_type[cell_type] = round(float(values.mean()), 5)
+        gene_celltype_means[gene] = per_type
+
+    return gene_vectors, selected_cell_types, dict(sorted(celltype_counts.items())), gene_celltype_means
+
+
+def dominant_celltype_from_means(per_type):
+    if not per_type:
+        return ""
+    ordered = sorted(per_type.items(), key=lambda item: (-float(item[1]), item[0]))
+    if not ordered or ordered[0][1] <= 0:
+        return ""
+    return ordered[0][0]
+
+
+def build_normal_coexpression_modules(dataset_dir, genes_of_interest, expression_support, public_gene_table):
+    gene_vectors, selected_cell_types, sampled_celltype_counts, gene_celltype_means = read_lukowski_selected_matrix(
+        dataset_dir,
+        genes_of_interest,
+    )
+    if not gene_vectors:
+        return {}, [], [f"lukowski_network_sampled_celltypes={json.dumps(sampled_celltype_counts, ensure_ascii=False)}"]
+
+    import numpy as np  # type: ignore
+
+    genes = sorted(gene_vectors)
+    matrix = np.vstack([gene_vectors[g] for g in genes])
+    valid_mask = np.std(matrix, axis=1) > 1e-4
+    genes = [g for g, keep in zip(genes, valid_mask.tolist()) if keep]
+    matrix = matrix[valid_mask]
+    if len(genes) < 3:
+        return {}, [], ["lukowski_network_insufficient_variable_genes"]
+
+    corr = np.corrcoef(matrix)
+    corr = np.nan_to_num(corr, nan=0.0, posinf=0.0, neginf=0.0)
+    gene_index = {gene: idx for idx, gene in enumerate(genes)}
+    threshold = 0.35
+    adjacency = {gene: set() for gene in genes}
+    for i, gene_i in enumerate(genes):
+        for j in range(i + 1, len(genes)):
+            if corr[i, j] >= threshold:
+                gene_j = genes[j]
+                adjacency[gene_i].add(gene_j)
+                adjacency[gene_j].add(gene_i)
+
+    components = []
+    seen = set()
+    for gene in genes:
+        if gene in seen:
+            continue
+        stack = [gene]
+        component = []
+        seen.add(gene)
+        while stack:
+            cur = stack.pop()
+            component.append(cur)
+            for nxt in adjacency.get(cur, ()):
+                if nxt not in seen:
+                    seen.add(nxt)
+                    stack.append(nxt)
+        if len(component) >= 3:
+            components.append(sorted(component))
+
+    gene_support = {}
+    module_rows = []
+    notes = [f"lukowski_network_sampled_celltypes={json.dumps(sampled_celltype_counts, ensure_ascii=False)}"]
+    for idx, component in enumerate(sorted(components, key=lambda comp: (-len(comp), comp[0])), start=1):
+        comp_indices = [genes.index(gene) for gene in component]
+        subcorr = corr[np.ix_(comp_indices, comp_indices)]
+        anchor_scores = {}
+        for i, gene in enumerate(component):
+            partner_count = max(len(component) - 1, 1)
+            anchor_scores[gene] = float((subcorr[i].sum() - 1.0) / partner_count)
+        ordered_anchors = [gene for gene, _score in sorted(anchor_scores.items(), key=lambda item: (-item[1], item[0]))]
+        marker_celltype_votes = defaultdict(float)
+        expression_celltype_votes = defaultdict(float)
+        public_hits = []
+        for gene in component:
+            for cell_type in marker_cell_types_for_gene(gene):
+                marker_celltype_votes[cell_type] += 1.0
+            for cell_type in expression_support.get(gene, {}).get("cell_types", []):
+                expression_celltype_votes[cell_type] += 0.5
+            per_type = gene_celltype_means.get(gene, {})
+            dominant = dominant_celltype_from_means(per_type)
+            if dominant:
+                expression_celltype_votes[dominant] += max(per_type.get(dominant, 0.0), 0.01)
+            if public_gene_table.get(gene, {}).get("rp_related", "") == "yes":
+                public_hits.append(gene)
+        if marker_celltype_votes:
+            dominant_type = sorted(marker_celltype_votes.items(), key=lambda item: (-item[1], item[0]))[0][0]
+        else:
+            dominant_type = sorted(expression_celltype_votes.items(), key=lambda item: (-item[1], item[0]))[0][0] if expression_celltype_votes else ""
+        module_id = f"normal_module_{idx:02d}"
+        module_rows.append({
+            "module_id": module_id,
+            "module_size": len(component),
+            "dominant_celltype": dominant_type,
+            "anchor_genes": ";".join(ordered_anchors[:5]),
+            "public_rp_gene_count": len(public_hits),
+            "public_rp_genes": ";".join(sorted(public_hits)),
+            "member_genes": ";".join(component),
+        })
+        for gene in component:
+            gene_support[gene] = {
+                "module_id": module_id,
+                "module_size": len(component),
+                "module_celltype": dominant_type,
+                "membership_strength": round(anchor_scores.get(gene, 0.0), 4),
+                "anchor_genes": ordered_anchors[:5],
+                "member_genes": component,
+                "rp_gene_count": len(public_hits),
+                "rp_genes": sorted(public_hits),
+            }
+    if module_rows:
+        module_defs = []
+        for row in module_rows:
+            anchors = [gene for gene in clean(row.get("anchor_genes", "")).split(";") if gene in gene_index][:3]
+            module_defs.append({
+                "module_id": row["module_id"],
+                "module_celltype": row.get("dominant_celltype", ""),
+                "module_size": int(row.get("module_size", 0) or 0),
+                "anchor_genes": anchors,
+                "member_genes": [gene for gene in clean(row.get("member_genes", "")).split(";") if gene],
+                "rp_gene_count": int(row.get("public_rp_gene_count", 0) or 0),
+                "rp_genes": [gene for gene in clean(row.get("public_rp_genes", "")).split(";") if gene],
+            })
+        for gene in genes:
+            if gene in gene_support:
+                continue
+            best = None
+            gene_idx = gene_index[gene]
+            for module in module_defs:
+                anchor_idxs = [gene_index[a] for a in module["anchor_genes"] if a in gene_index]
+                if not anchor_idxs:
+                    continue
+                score = float(np.mean([corr[gene_idx, idx] for idx in anchor_idxs]))
+                if score < 0.15:
+                    continue
+                if best is None or score > best["membership_strength"]:
+                    best = {
+                        "module_id": module["module_id"],
+                        "module_size": module["module_size"],
+                        "module_celltype": module["module_celltype"],
+                        "membership_strength": round(score, 4),
+                        "anchor_genes": module["anchor_genes"],
+                        "member_genes": module["member_genes"],
+                        "rp_gene_count": module["rp_gene_count"],
+                        "rp_genes": module["rp_genes"],
+                    }
+            if best:
+                gene_support[gene] = best
+    notes.append(f"lukowski_network_modules={len(module_rows)}")
+    return gene_support, module_rows, notes
+
+
+def annotate_module_disease_support(gene_network_support, module_rows, dataset_disease_support):
+    if not gene_network_support or not module_rows:
+        return gene_network_support, module_rows
+
+    module_map = {row["module_id"]: dict(row) for row in module_rows}
+    gene_disease_hits = {}
+    for dataset_id, gene_map in dataset_disease_support.items():
+        for gene, evidence in gene_map.items():
+            entry = gene_disease_hits.setdefault(gene, {
+                "models": set(),
+                "contexts": set(),
+                "details": set(),
+                "max_abs_log2fc": 0.0,
+            })
+            entry["models"].add(dataset_id)
+            entry["contexts"].update(evidence.get("contexts", []))
+            entry["details"].update(evidence.get("details", []))
+            entry["max_abs_log2fc"] = max(float(entry["max_abs_log2fc"]), float(evidence.get("max_abs_log2fc", 0.0)))
+
+    for module_id, row in module_map.items():
+        member_genes = [g for g in clean(row.get("member_genes", "")).split(";") if g]
+        models = set()
+        contexts = set()
+        details = set()
+        max_abs = 0.0
+        perturbed = 0
+        for gene in member_genes:
+            hit = gene_disease_hits.get(gene)
+            if not hit:
+                continue
+            perturbed += 1
+            models.update(hit["models"])
+            contexts.update(hit["contexts"])
+            details.update(hit["details"])
+            max_abs = max(max_abs, float(hit["max_abs_log2fc"]))
+        row["disease_models"] = ";".join(sorted(models))
+        row["disease_contexts"] = ";".join(sorted(contexts))
+        row["disease_details"] = ";".join(sorted(details))
+        row["disease_gene_count"] = perturbed
+        row["disease_gene_fraction"] = round((perturbed / len(member_genes)) if member_genes else 0.0, 4)
+        row["disease_max_abs_log2fc"] = round(max_abs, 4)
+
+    for gene, support in gene_network_support.items():
+        module = module_map.get(support["module_id"], {})
+        support["disease_models"] = [m for m in clean(module.get("disease_models", "")).split(";") if m]
+        support["disease_contexts"] = [m for m in clean(module.get("disease_contexts", "")).split(";") if m]
+        support["disease_details"] = [m for m in clean(module.get("disease_details", "")).split(";") if m]
+        support["disease_gene_fraction"] = float(module.get("disease_gene_fraction", 0.0) or 0.0)
+        support["disease_max_abs_log2fc"] = float(module.get("disease_max_abs_log2fc", 0.0) or 0.0)
+
+    return gene_network_support, [module_map[row["module_id"]] for row in module_rows]
+
+
 def genes_from_tar(path):
     genes = set()
     members = []
@@ -860,12 +1137,13 @@ def wes_score(row):
     return score
 
 
-def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_table, dataset_expression_support=None, dataset_disease_support=None):
+def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_table, dataset_expression_support=None, dataset_disease_support=None, gene_network_support=None):
     variant_rows = []
     evidence_rows = []
     gene_agg = {}
     dataset_expression_support = dataset_expression_support or {}
     dataset_disease_support = dataset_disease_support or {}
+    gene_network_support = gene_network_support or {}
 
     disease_dataset_ids = [d for d in dataset_gene_sets if any(x in d.lower() for x in ("rd1", "rd10", "rpgr"))]
     normal_dataset_ids = [d for d in dataset_gene_sets if "normal" in d.lower() or "nsr" in d.lower()]
@@ -880,6 +1158,7 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
         any_hits = [d for d, genes in dataset_gene_sets.items() if gene in genes]
         expression_hits = {d: dataset_expression_support.get(d, {}).get(gene, {}) for d in normal_dataset_ids if dataset_expression_support.get(d, {}).get(gene)}
         disease_evidence_hits = {d: dataset_disease_support.get(d, {}).get(gene, {}) for d in disease_dataset_ids if dataset_disease_support.get(d, {}).get(gene)}
+        network_hit = gene_network_support.get(gene, {})
         prior = GENE_CELL_PRIORS.get(gene)
         public_row = public_gene_table.get(gene, {})
         public_rp_related = public_row.get("rp_related", "") == "yes"
@@ -898,15 +1177,21 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
         if disease_hits:
             disease_score += 15 + 5 * min(len(disease_hits), 3)
 
-        pathway_score = 0
-        if modules:
-            pathway_score += 10
-        if prior:
-            pathway_score += 10
-        if public_row:
-            pathway_score += 10
-        if public_rp_related:
-            pathway_score += 10
+        network_score = 0
+        if network_hit.get("module_id"):
+            network_score += 10
+        if network_hit.get("module_size", 0) >= 4:
+            network_score += 10
+        if float(network_hit.get("membership_strength", 0.0) or 0.0) >= 0.45:
+            network_score += 10
+        elif float(network_hit.get("membership_strength", 0.0) or 0.0) >= 0.35:
+            network_score += 5
+        if int(network_hit.get("rp_gene_count", 0) or 0) >= 3 or public_rp_related:
+            network_score += 5
+        if float(network_hit.get("disease_gene_fraction", 0.0) or 0.0) >= 0.3:
+            network_score += 10
+        elif float(network_hit.get("disease_gene_fraction", 0.0) or 0.0) >= 0.15:
+            network_score += 5
         best_expression_fraction = max((hit.get("best_fraction", 0.0) for hit in expression_hits.values()), default=0.0)
         if best_expression_fraction >= 0.2:
             normal_score += 10
@@ -921,7 +1206,7 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
         elif disease_max_abs_log2fc >= 0.5:
             disease_score += 5
 
-        expression_score = normal_score + disease_score + pathway_score
+        expression_score = normal_score + disease_score + network_score
 
         downgrade = []
         if not any_hits:
@@ -944,7 +1229,7 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
             "wes_score": base,
             "normal_celltype_score": normal_score,
             "disease_model_score": disease_score,
-            "pathway_module_score": pathway_score,
+            "network_support_score": network_score,
             "scrna_support_score": expression_score,
             "total_priority_score": total,
             "cell_type_support": ";".join(cell_types),
@@ -953,6 +1238,16 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
             "disease_model_support": ";".join(disease_contexts),
             "disease_model_detail": ";".join(disease_details),
             "disease_max_abs_log2fc": disease_max_abs_log2fc,
+            "coexpression_module_id": network_hit.get("module_id", ""),
+            "coexpression_module_celltype": network_hit.get("module_celltype", ""),
+            "coexpression_module_size": network_hit.get("module_size", 0),
+            "coexpression_module_membership": network_hit.get("membership_strength", 0.0),
+            "coexpression_module_anchor_genes": ";".join(network_hit.get("anchor_genes", [])),
+            "module_network_rp_genes": ";".join(network_hit.get("rp_genes", [])),
+            "module_network_disease_models": ";".join(network_hit.get("disease_models", [])),
+            "module_network_disease_contexts": ";".join(network_hit.get("disease_contexts", [])),
+            "module_network_disease_fraction": network_hit.get("disease_gene_fraction", 0.0),
+            "legacy_state_module_support": ";".join(modules),
             "state_module_support": ";".join(modules),
             "normal_dataset_hits": ";".join(normal_hits),
             "disease_dataset_hits": ";".join(disease_hits),
@@ -961,7 +1256,16 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
             "downgrade_flags": ";".join(sorted(set(downgrade))),
             "classification": row.get("classification", ""),
             "conclusion": row.get("conclusion", ""),
-            "interpretation": build_interpretation(gene, cell_types, modules, disease_hits, downgrade, disease_contexts=disease_contexts, disease_details=disease_details),
+            "interpretation": build_interpretation(
+                gene,
+                cell_types,
+                modules,
+                disease_hits,
+                downgrade,
+                disease_contexts=disease_contexts,
+                disease_details=disease_details,
+                network_hit=network_hit,
+            ),
         }
         evidence_rows.append(evidence)
         variant_rows.append(evidence.copy())
@@ -975,7 +1279,7 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
             "best_wes_score": 0,
             "best_normal_celltype_score": 0,
             "best_disease_model_score": 0,
-            "best_pathway_module_score": 0,
+            "best_network_support_score": 0,
             "best_scrna_support_score": 0,
             "cell_type_support": set(),
             "normal_celltype_expression_support": set(),
@@ -983,6 +1287,11 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
             "disease_model_support": set(),
             "disease_model_detail": set(),
             "disease_max_abs_log2fc": 0.0,
+            "coexpression_module_ids": set(),
+            "coexpression_module_celltypes": set(),
+            "coexpression_module_anchor_genes": set(),
+            "module_network_disease_models": set(),
+            "module_network_disease_contexts": set(),
             "state_module_support": set(),
             "normal_dataset_hits": set(),
             "disease_dataset_hits": set(),
@@ -1001,7 +1310,7 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
         agg["best_wes_score"] = max(agg["best_wes_score"], base)
         agg["best_normal_celltype_score"] = max(agg["best_normal_celltype_score"], normal_score)
         agg["best_disease_model_score"] = max(agg["best_disease_model_score"], disease_score)
-        agg["best_pathway_module_score"] = max(agg["best_pathway_module_score"], pathway_score)
+        agg["best_network_support_score"] = max(agg["best_network_support_score"], network_score)
         agg["best_scrna_support_score"] = max(agg["best_scrna_support_score"], expression_score)
         agg["cell_type_support"].update(cell_types)
         agg["normal_celltype_expression_support"].update(expression_cell_types)
@@ -1009,6 +1318,13 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
         agg["disease_model_support"].update(disease_contexts)
         agg["disease_model_detail"].update(disease_details)
         agg["disease_max_abs_log2fc"] = max(float(agg["disease_max_abs_log2fc"]), float(disease_max_abs_log2fc))
+        if network_hit.get("module_id"):
+            agg["coexpression_module_ids"].add(network_hit.get("module_id", ""))
+        if network_hit.get("module_celltype"):
+            agg["coexpression_module_celltypes"].add(network_hit.get("module_celltype", ""))
+        agg["coexpression_module_anchor_genes"].update(network_hit.get("anchor_genes", []))
+        agg["module_network_disease_models"].update(network_hit.get("disease_models", []))
+        agg["module_network_disease_contexts"].update(network_hit.get("disease_contexts", []))
         agg["state_module_support"].update(modules)
         agg["normal_dataset_hits"].update(normal_hits)
         agg["disease_dataset_hits"].update(disease_hits)
@@ -1024,7 +1340,7 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
             "best_wes_score": agg["best_wes_score"],
             "best_normal_celltype_score": agg["best_normal_celltype_score"],
             "best_disease_model_score": agg["best_disease_model_score"],
-            "best_pathway_module_score": agg["best_pathway_module_score"],
+            "best_network_support_score": agg["best_network_support_score"],
             "best_scrna_support_score": agg["best_scrna_support_score"],
             "variant_count": agg["variant_count"],
             "family_count": len(agg["families"]),
@@ -1036,6 +1352,11 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
             "disease_model_support": ";".join(sorted(agg["disease_model_support"])),
             "disease_model_detail": ";".join(sorted(agg["disease_model_detail"])),
             "disease_max_abs_log2fc": agg["disease_max_abs_log2fc"],
+            "coexpression_module_support": ";".join(sorted(filter(None, agg["coexpression_module_ids"]))),
+            "coexpression_module_celltype_support": ";".join(sorted(filter(None, agg["coexpression_module_celltypes"]))),
+            "coexpression_module_anchor_genes": ";".join(sorted(filter(None, agg["coexpression_module_anchor_genes"]))),
+            "module_network_disease_models": ";".join(sorted(filter(None, agg["module_network_disease_models"]))),
+            "module_network_disease_contexts": ";".join(sorted(filter(None, agg["module_network_disease_contexts"]))),
             "state_module_support": ";".join(sorted(agg["state_module_support"])),
             "normal_dataset_hits": ";".join(sorted(agg["normal_dataset_hits"])),
             "disease_dataset_hits": ";".join(sorted(agg["disease_dataset_hits"])),
@@ -1050,12 +1371,22 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
     return gene_rows, variant_rows, evidence_rows
 
 
-def build_interpretation(gene, cell_types, modules, disease_hits, downgrade, disease_contexts=None, disease_details=None):
+def build_interpretation(gene, cell_types, modules, disease_hits, downgrade, disease_contexts=None, disease_details=None, network_hit=None):
     parts = []
     disease_contexts = disease_contexts or []
     disease_details = disease_details or []
+    network_hit = network_hit or {}
     if cell_types:
         parts.append(f"{gene} has RP-relevant cell-type support: {', '.join(cell_types)}")
+    if network_hit.get("module_id"):
+        module_desc = network_hit.get("module_id", "")
+        if network_hit.get("module_celltype"):
+            module_desc = f"{module_desc}[{network_hit['module_celltype']}]"
+        anchors = ", ".join(network_hit.get("anchor_genes", [])[:4])
+        if anchors:
+            parts.append(f"coexpression module support: {module_desc} anchored by {anchors}")
+        else:
+            parts.append(f"coexpression module support: {module_desc}")
     if modules:
         parts.append(f"mechanism module: {', '.join(modules)}")
     if disease_hits:
@@ -1143,7 +1474,17 @@ def main():
     dataset_gene_sets = {}
     dataset_expression_support = {}
     dataset_disease_support = {}
+    gene_network_support = {}
+    network_module_rows = []
     dataset_summaries = []
+    public_gene_table = read_public_gene_table(args.public_gene_table)
+    candidate_path = find_candidate_table(args.candidate_table)
+    pre_candidates = read_candidates(candidate_path)
+    network_genes_of_interest = {row["gene"] for row in pre_candidates if row.get("gene")}
+    network_genes_of_interest.update(public_gene_table.keys())
+    for markers in RP_CELL_MARKERS.values():
+        network_genes_of_interest.update(upper_gene(marker) for marker in markers)
+    network_genes_of_interest.update(GENE_CELL_PRIORS.keys())
     for row in manifest_rows:
         dataset_id = row.get("dataset_id", "")
         dataset_dir = Path(args.download_dir) / dataset_id
@@ -1152,15 +1493,19 @@ def main():
         expression_meta = {}
         disease_notes = []
         if "lukowski" in dataset_id.lower():
-            candidate_path = find_candidate_table(args.candidate_table)
-            pre_candidates = read_candidates(candidate_path)
-            public_gene_table = read_public_gene_table(args.public_gene_table)
-            genes_of_interest = {row["gene"] for row in pre_candidates if row.get("gene")}
-            genes_of_interest.update(public_gene_table.keys())
-            expression_support, expression_meta = summarize_lukowski_expression(dataset_dir, genes_of_interest)
+            expression_support, expression_meta = summarize_lukowski_expression(dataset_dir, network_genes_of_interest)
             dataset_expression_support[dataset_id] = expression_support
+            network_support, network_module_rows, network_notes = build_normal_coexpression_modules(
+                dataset_dir,
+                network_genes_of_interest,
+                expression_support,
+                public_gene_table,
+            )
+            gene_network_support.update(network_support)
             if expression_meta.get("celltype_totals"):
                 notes.append(f"lukowski_celltypes={json.dumps(expression_meta['celltype_totals'], ensure_ascii=False)}")
+            if network_notes:
+                notes.extend(network_notes)
         if "rpgr" in dataset_id.lower():
             disease_support, disease_notes = parse_rpgr_deg_support(dataset_dir)
             dataset_disease_support[dataset_id] = disease_support
@@ -1187,8 +1532,11 @@ def main():
             "read_notes": " | ".join(notes),
         })
 
-    public_gene_table = read_public_gene_table(args.public_gene_table)
-    candidate_path = find_candidate_table(args.candidate_table)
+    gene_network_support, network_module_rows = annotate_module_disease_support(
+        gene_network_support,
+        network_module_rows,
+        dataset_disease_support,
+    )
     candidates = read_candidates(candidate_path)
     if not candidates:
         # Keep the pipeline useful even before WES candidate tables are mounted.
@@ -1202,9 +1550,11 @@ def main():
         public_gene_table,
         dataset_expression_support=dataset_expression_support,
         dataset_disease_support=dataset_disease_support,
+        gene_network_support=gene_network_support,
     )
 
     write_tsv(out_dir / "read_check.tsv", dataset_summaries)
+    write_tsv(out_dir / "network_module_summary.tsv", network_module_rows)
     write_tsv(out_dir / "gene_priority_ranking.tsv", gene_rows)
     write_tsv(out_dir / "variant_priority_ranking.tsv", variant_rows)
     write_tsv(out_dir / "evidence_breakdown.tsv", evidence_rows)
@@ -1215,6 +1565,7 @@ def main():
         "candidate_rows": len(candidates),
         "ranked_genes": len(gene_rows),
         "datasets": dataset_summaries,
+        "network_modules": network_module_rows[:20],
         "top_genes": gene_rows[:20],
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1223,6 +1574,7 @@ def main():
         "ranked_genes": len(gene_rows),
         "outputs": [
             str(out_dir / "read_check.tsv"),
+            str(out_dir / "network_module_summary.tsv"),
             str(out_dir / "gene_priority_ranking.tsv"),
             str(out_dir / "variant_priority_ranking.tsv"),
             str(out_dir / "evidence_breakdown.tsv"),

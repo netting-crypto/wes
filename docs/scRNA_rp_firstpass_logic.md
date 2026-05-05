@@ -8,9 +8,16 @@ The working scoring frame is:
 
 1. normal cell-type relevance score
 2. disease-model perturbation score
-3. pathway/module support score
+3. network support score
 
 These three parts are summed into a single `scrna_support_score`, then combined with the current variant/gene candidate input to produce a ranked list.
+
+The current upgraded third score is no longer a pure manual pathway label score. It is built from:
+
+- normal-retina coexpression module assignment
+- module cell-type identity
+- module overlap with public RP genes
+- module-level disease perturbation across `RPGR`, `rd1`, and `rd10`
 
 ## 2. Candidate Input
 
@@ -86,6 +93,40 @@ Current outputs contributed:
   - `rpgr_celltype_deg`
 - `disease_model_detail`
 - `disease_max_abs_log2fc`
+
+### 3.5 Normal Retina Coexpression Modules
+
+Source dataset:
+
+- `normal_human_retina_lukowski_zenodo`
+
+Current processing:
+
+- sample cells across major retina cell types from the Lukowski matrix
+- extract a gene-by-cell matrix for candidate genes, PanelApp retinal genes, marker genes, and curated RP priors
+- compute gene-gene correlations in the normal retina reference
+- build connected coexpression modules from the correlation graph
+- assign each module a dominant retina cell-type label
+- project disease perturbation from `RPGR`, `rd1`, and `rd10` onto each module
+
+Current outputs contributed:
+
+- `coexpression_module_support`
+- `coexpression_module_celltype_support`
+- `module_network_disease_models`
+- `module_network_disease_contexts`
+- `best_network_support_score`
+
+Current local validation result:
+
+- module `normal_module_01`
+  - dominant cell type: `photoreceptor`
+  - module size: `104`
+  - anchors: `KCNV2;GUCA1A;UNC119;RP1;AIPL1`
+- module `normal_module_02`
+  - dominant cell type: `microglia`
+  - module size: `7`
+  - anchors: `C1QA;AIF1;PLD4;C3;CX3CR1`
 
 ### 3.3 rd1 Mouse Retina Disease Model
 
@@ -168,7 +209,7 @@ Current outputs contributed:
 - `disease_model_detail`
 - `disease_max_abs_log2fc`
 
-### 3.5 Public RP/IRD Gene Universe
+### 3.6 Public RP/IRD Gene Universe
 
 Source:
 
@@ -183,10 +224,11 @@ Current role:
 
 Main working output directory:
 
-- `output/scrna-local/finalscore-rd10-validation/results/`
+- `output/scrna-local/networkscore-validation/results/`
 
 Key files:
 
+- `network_module_summary.tsv`
 - `gene_priority_ranking.tsv`
 - `variant_priority_ranking.tsv`
 - `evidence_breakdown.tsv`
@@ -201,7 +243,7 @@ Key files:
 - `best_wes_score`
 - `best_normal_celltype_score`
 - `best_disease_model_score`
-- `best_pathway_module_score`
+- `best_network_support_score`
 - `best_scrna_support_score`
 
 ### Evidence fields
@@ -212,22 +254,27 @@ Key files:
 - `disease_model_support`
 - `disease_model_detail`
 - `disease_max_abs_log2fc`
+- `coexpression_module_support`
+- `coexpression_module_celltype_support`
+- `coexpression_module_anchor_genes`
+- `module_network_disease_models`
+- `module_network_disease_contexts`
 - `state_module_support`
 - `public_rp_gene_support`
 - `top_interpretation`
 
 ## 6. Current Top Genes
 
-Based on the current first-pass run with `rd10` included:
+Based on the current upgraded network-score run:
 
-1. `ABCA4` - normal `55`, disease `60`, pathway `40`, total `210`
-2. `RDH12` - normal `55`, disease `60`, pathway `40`, total `210`
-3. `USH2A` - normal `55`, disease `60`, pathway `40`, total `210`
-4. `EYS` - normal `55`, disease `50`, pathway `40`, total `200`
-5. `CNGA1` - normal `55`, disease `60`, pathway `40`, total `195`
-6. `MAK` - normal `55`, disease `60`, pathway `40`, total `195`
-7. `NRL` - normal `55`, disease `60`, pathway `40`, total `195`
-8. `RP1` - normal `55`, disease `60`, pathway `40`, total `195`
+1. `ABCA4` - normal `55`, disease `60`, network `35`, total `205`
+2. `RDH12` - normal `55`, disease `60`, network `35`, total `205`
+3. `USH2A` - normal `55`, disease `60`, network `35`, total `205`
+4. `EYS` - normal `55`, disease `50`, network `35`, total `195`
+5. `CNGA1` - normal `55`, disease `60`, network `35`, total `190`
+6. `CRB1` - normal `55`, disease `60`, network `35`, total `190`
+7. `IMPG2` - normal `55`, disease `60`, network `35`, total `190`
+8. `MAK` - normal `55`, disease `60`, network `35`, total `190`
 
 Representative newly integrated rd10-supported genes now include:
 
@@ -236,6 +283,14 @@ Representative newly integrated rd10-supported genes now include:
 - `CNGA1` via `rd10_cone_deg` and `rd10_rod_early_deg`
 - `RHO` via `rd10_cone_deg` and `rd10_rod_late_deg`
 - `PDE6B` via `rd10_cone_deg`
+
+Representative network-supported genes now include:
+
+- `ABCA4` in `normal_module_01[photoreceptor]`
+- `USH2A` in `normal_module_01[photoreceptor]`
+- `RPGR` in `normal_module_01[photoreceptor]`
+- `PDE6B` in `normal_module_01[photoreceptor]`
+- `RHO` in `normal_module_01[photoreceptor]`
 
 ## 7. Plot-Ready Items
 
@@ -251,7 +306,7 @@ Already suitable for plotting now:
    - fields:
      - `best_normal_celltype_score`
      - `best_disease_model_score`
-     - `best_pathway_module_score`
+     - `best_network_support_score`
 
 3. disease evidence heatmap
    - rows: top genes
@@ -264,7 +319,14 @@ Already suitable for plotting now:
      - `rpgr_time_deg`
      - `rpgr_celltype_deg`
 
-4. normal cell-type support heatmap
+4. coexpression module heatmap
+   - rows: top genes
+   - columns:
+     - `coexpression_module_support`
+     - `coexpression_module_celltype_support`
+     - `module_network_disease_models`
+
+5. normal cell-type support heatmap
    - rows: top genes
    - columns:
      - rod
@@ -275,7 +337,7 @@ Already suitable for plotting now:
      - rgc
      - microglia
 
-5. rd1 stage DEG support summary
+6. rd1 stage DEG support summary
    - x: stage (`P11`, `P13`, `P17`)
    - y: number of DEG-like genes
    - current values:
@@ -283,11 +345,11 @@ Already suitable for plotting now:
      - `P13: 6693`
      - `P17: 8574`
 
-6. disease perturbation strength plot
+7. disease perturbation strength plot
    - x: top genes
    - y: `disease_max_abs_log2fc`
 
-7. candidate coverage summary
+8. candidate coverage summary
    - total candidate variants
    - total unique genes
    - genes with normal support
@@ -302,10 +364,10 @@ For the first-pass report, the highest-yield figures are:
 1. top 20 genes ranked bar plot
 2. top 20 genes three-component stacked score plot
 3. top 20 genes disease evidence heatmap
-4. cross-model disease evidence heatmap including `rd10`, `rd1`, and `RPGR`
+4. top 20 genes coexpression-module support heatmap
 
 ## 9. Remaining Work Before First-Pass Completion
 
-1. promote `finalscore-rd10-validation` outputs into the main first-pass result set
+1. decide whether to promote `networkscore-validation` as the new first-pass default result set
 2. create plotting script(s) for the top summary figures
 3. decide whether to keep `rd10` driven by author DEG supplements only, or invest further in per-cell sample reconstruction from the aggregate H5

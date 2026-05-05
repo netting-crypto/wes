@@ -12,6 +12,7 @@ log_dir="${SCRNA_LOG_DIR:-$output_dir/logs}"
 heartbeat_interval="${SCRNA_HEARTBEAT_SECONDS:-300}"
 stall_seconds="${SCRNA_STALL_SECONDS:-1800}"
 download_retries="${SCRNA_DOWNLOAD_RETRIES:-2}"
+download_max_concurrent="${SCRNA_DOWNLOAD_MAX_CONCURRENT:-4}"
 candidate_table="${SCRNA_WES_CANDIDATE_TABLE:-$project_dir/config/wes/company-family-targets.tsv}"
 public_gene_table="${SCRNA_PUBLIC_GENE_TABLE:-$project_dir/output/scrna/results/panelapp_retinal_disorders.tsv}"
 
@@ -33,6 +34,7 @@ echo "data_root=$data_root"
 echo "manifest_path=$manifest_path"
 echo "candidate_table=$candidate_table"
 echo "stall_seconds=$stall_seconds"
+echo "download_max_concurrent=$download_max_concurrent"
 
 phase_file="$summary_dir/current_phase.txt"
 printf 'timestamp\tphase\tmessage\n' > "$heartbeat_file"
@@ -149,6 +151,118 @@ record_status() {
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$dataset_id" "$status" "$attempts" "$file_count" "$bytes" "${6:-}" >> "$status_file"
 }
 
+process_dataset_row() {
+  local dataset_id="$1"
+  local priority="$2"
+  local species="$3"
+  local model="$4"
+  local accession="$5"
+  local source_url="$6"
+  local download_urls="$7"
+  local file_type="$8"
+  local expected_file="$9"
+  local has_author_annotation="${10}"
+  local notes="${11}"
+  local local_dataset_dir="$download_dir/$dataset_id"
+  mkdir -p "$local_dataset_dir"
+  echo "--- dataset=$dataset_id priority=$priority model=$model accession=$accession ---"
+  echo "$notes" > "$local_dataset_dir/notes.txt"
+  printf '%s\n' "$source_url" > "$local_dataset_dir/source_url.txt"
+  printf '%s\n' "$download_urls" > "$local_dataset_dir/download_urls.txt"
+
+  IFS='|' read -r -a urls <<< "$download_urls"
+  IFS=';' read -r -a expected_files <<< "$expected_file"
+  dataset_status="downloaded"
+  attempts=0
+  message=""
+
+  required_count=1
+  if (( ${#expected_files[@]} > 1 )); then
+    required_count="${#expected_files[@]}"
+  fi
+
+  if (( required_count > 1 && ${#urls[@]} != required_count )); then
+    dataset_status="failed"
+    message="expected_file/url count mismatch expected=${#expected_files[@]} urls=${#urls[@]}"
+    echo "[WARN] $message"
+    record_status "$dataset_id" "$dataset_status" "$attempts" "" "" "$message"
+    return 0
+  fi
+
+  if (( required_count == 1 )); then
+    target_name="${expected_files[0]:-$(safe_filename_from_url "${urls[0]}" "${dataset_id}.${file_type}")}"
+    if [[ "$file_type" == "html" ]]; then
+      target_name="${dataset_id}.metadata.html"
+    fi
+    target="$local_dataset_dir/$target_name"
+
+    file_downloaded=0
+    for url in "${urls[@]}"; do
+      [[ -z "$url" ]] && continue
+      for attempt in $(seq 1 "$download_retries"); do
+        attempts=$((attempts + 1))
+        log_path="$local_dataset_dir/download-${target_name}-attempt${attempt}.log"
+        echo "Downloading $dataset_id attempt=$attempt target=$target"
+        set +e
+        run_download_with_watchdog "$dataset_id" "$url" "$target" "$log_path"
+        status=$?
+        set -e
+        if [[ $status -eq 0 && -s "$target" ]]; then
+          message="downloaded $target_name"
+          file_downloaded=1
+          break 2
+        fi
+        message="failed url=$url status=$status"
+        echo "[WARN] $message"
+      done
+    done
+
+    if (( file_downloaded == 0 )); then
+      dataset_status="failed"
+    fi
+  else
+    downloaded_files=0
+    failed_files=()
+    for idx in "${!urls[@]}"; do
+      url="${urls[$idx]}"
+      [[ -z "$url" ]] && continue
+      target_name="${expected_files[$idx]}"
+      [[ -z "$target_name" ]] && target_name="$(safe_filename_from_url "$url" "${dataset_id}_${idx}.${file_type}")"
+      target="$local_dataset_dir/$target_name"
+      file_downloaded=0
+
+      for attempt in $(seq 1 "$download_retries"); do
+        attempts=$((attempts + 1))
+        log_path="$local_dataset_dir/download-${target_name}-attempt${attempt}.log"
+        echo "Downloading $dataset_id file=$target_name attempt=$attempt target=$target"
+        set +e
+        run_download_with_watchdog "$dataset_id" "$url" "$target" "$log_path"
+        status=$?
+        set -e
+        if [[ $status -eq 0 && -s "$target" ]]; then
+          downloaded_files=$((downloaded_files + 1))
+          file_downloaded=1
+          break
+        fi
+        echo "[WARN] failed url=$url status=$status"
+      done
+
+      if (( file_downloaded == 0 )); then
+        failed_files+=("$target_name")
+      fi
+    done
+
+    if (( downloaded_files == required_count )); then
+      message="downloaded ${downloaded_files}/${required_count} required files"
+    else
+      dataset_status="failed"
+      message="missing required files: ${failed_files[*]}"
+    fi
+  fi
+
+  record_status "$dataset_id" "$dataset_status" "$attempts" "" "" "$message"
+}
+
 download_manifest() {
   if [[ ! -f "$manifest_path" ]]; then
     echo "Manifest not found: $manifest_path" >&2
@@ -160,106 +274,21 @@ download_manifest() {
   fi
 
   set_phase "download" "starting manifest downloads"
-  tail -n +2 "$manifest_path" | while IFS=$'\t' read -r dataset_id priority species model accession source_url download_urls file_type expected_file has_author_annotation notes; do
+  active_jobs=0
+  while IFS=$'\t' read -r dataset_id priority species model accession source_url download_urls file_type expected_file has_author_annotation notes; do
+    [[ "$dataset_id" == "dataset_id" ]] && continue
     [[ -z "${dataset_id:-}" ]] && continue
-    local_dataset_dir="$download_dir/$dataset_id"
-    mkdir -p "$local_dataset_dir"
-    echo "--- dataset=$dataset_id priority=$priority model=$model accession=$accession ---"
-    echo "$notes" > "$local_dataset_dir/notes.txt"
-    printf '%s\n' "$source_url" > "$local_dataset_dir/source_url.txt"
-    printf '%s\n' "$download_urls" > "$local_dataset_dir/download_urls.txt"
-
-    IFS='|' read -r -a urls <<< "$download_urls"
-    IFS=';' read -r -a expected_files <<< "$expected_file"
-    dataset_status="downloaded"
-    attempts=0
-    message=""
-
-    required_count=1
-    if (( ${#expected_files[@]} > 1 )); then
-      required_count="${#expected_files[@]}"
+    process_dataset_row "$dataset_id" "$priority" "$species" "$model" "$accession" "$source_url" "$download_urls" "$file_type" "$expected_file" "$has_author_annotation" "$notes" &
+    active_jobs=$((active_jobs + 1))
+    if (( active_jobs >= download_max_concurrent )); then
+      wait -n
+      active_jobs=$((active_jobs - 1))
     fi
+  done < "$manifest_path"
 
-    if (( required_count > 1 && ${#urls[@]} != required_count )); then
-      dataset_status="failed"
-      message="expected_file/url count mismatch expected=${#expected_files[@]} urls=${#urls[@]}"
-      echo "[WARN] $message"
-      record_status "$dataset_id" "$dataset_status" "$attempts" "" "" "$message"
-      continue
-    fi
-
-    if (( required_count == 1 )); then
-      target_name="${expected_files[0]:-$(safe_filename_from_url "${urls[0]}" "${dataset_id}.${file_type}")}"
-      if [[ "$file_type" == "html" ]]; then
-        target_name="${dataset_id}.metadata.html"
-      fi
-      target="$local_dataset_dir/$target_name"
-
-      file_downloaded=0
-      for url in "${urls[@]}"; do
-        [[ -z "$url" ]] && continue
-        for attempt in $(seq 1 "$download_retries"); do
-          attempts=$((attempts + 1))
-          log_path="$local_dataset_dir/download-${target_name}-attempt${attempt}.log"
-          echo "Downloading $dataset_id attempt=$attempt target=$target"
-          set +e
-          run_download_with_watchdog "$dataset_id" "$url" "$target" "$log_path"
-          status=$?
-          set -e
-          if [[ $status -eq 0 && -s "$target" ]]; then
-            message="downloaded $target_name"
-            file_downloaded=1
-            break 2
-          fi
-          message="failed url=$url status=$status"
-          echo "[WARN] $message"
-        done
-      done
-
-      if (( file_downloaded == 0 )); then
-        dataset_status="failed"
-      fi
-    else
-      downloaded_files=0
-      failed_files=()
-      for idx in "${!urls[@]}"; do
-        url="${urls[$idx]}"
-        [[ -z "$url" ]] && continue
-        target_name="${expected_files[$idx]}"
-        [[ -z "$target_name" ]] && target_name="$(safe_filename_from_url "$url" "${dataset_id}_${idx}.${file_type}")"
-        target="$local_dataset_dir/$target_name"
-        file_downloaded=0
-
-        for attempt in $(seq 1 "$download_retries"); do
-          attempts=$((attempts + 1))
-          log_path="$local_dataset_dir/download-${target_name}-attempt${attempt}.log"
-          echo "Downloading $dataset_id file=$target_name attempt=$attempt target=$target"
-          set +e
-          run_download_with_watchdog "$dataset_id" "$url" "$target" "$log_path"
-          status=$?
-          set -e
-          if [[ $status -eq 0 && -s "$target" ]]; then
-            downloaded_files=$((downloaded_files + 1))
-            file_downloaded=1
-            break
-          fi
-          echo "[WARN] failed url=$url status=$status"
-        done
-
-        if (( file_downloaded == 0 )); then
-          failed_files+=("$target_name")
-        fi
-      done
-
-      if (( downloaded_files == required_count )); then
-        message="downloaded ${downloaded_files}/${required_count} required files"
-      else
-        dataset_status="failed"
-        message="missing required files: ${failed_files[*]}"
-      fi
-    fi
-
-    record_status "$dataset_id" "$dataset_status" "$attempts" "" "" "$message"
+  while (( active_jobs > 0 )); do
+    wait -n
+    active_jobs=$((active_jobs - 1))
   done
 }
 

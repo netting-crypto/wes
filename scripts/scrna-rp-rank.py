@@ -68,6 +68,15 @@ STATE_MODULES = {
     "synapse_structure": {"RIMS1", "CACNA2D4", "FSCN2", "ROM1"},
 }
 
+WES_COLUMN_ALIASES = {
+    "gene": ["gene", "\u57fa\u56e0", "Gene"],
+    "family_id": ["family_id", "Family", "\u6837\u672c\u540d\u79f0"],
+    "sample_id": ["sample_id", "lab_id", "\u5b9e\u9a8c\u5ba4\u7f16\u53f7", "\u4f18\u4e50\u7f16\u53f7"],
+    "classification": ["classification", "\u81f4\u75c5\u6027\u8bc4\u7ea7", "acmg_classification"],
+    "conclusion": ["conclusion", "\u62a5\u544a\u7ed3\u8bba"],
+    "variant": ["variant", "\u53d8\u5f02\uff08\u6807\u51c6\u8f6c\u5f55\u672c\u5bf9\u5e94\u6ce8\u91ca\uff09", "variant_hgvs"],
+}
+
 
 def clean(value):
     return re.sub(r"\s+", " ", str(value or "")).strip()
@@ -75,6 +84,14 @@ def clean(value):
 
 def upper_gene(value):
     return clean(value).split(";")[0].upper()
+
+
+def first_present(row, keys, default=""):
+    for key in keys:
+        value = row.get(key, "")
+        if clean(value):
+            return value
+    return default
 
 
 def read_tsv(path):
@@ -152,14 +169,14 @@ def read_candidates(path):
         "conclusion": "",
     }
     for row in rows:
-        gene = row.get("gene") or row.get("基因") or row.get("Gene")
+        gene = first_present(row, WES_COLUMN_ALIASES["gene"])
         if not clean(gene):
             continue
-        family_id = row.get("family_id") or row.get("Family") or row.get("样本名称") or last_context["family_id"]
-        sample_id = row.get("sample_id") or row.get("lab_id") or row.get("实验室编号") or row.get("优乐编号") or last_context["sample_id"]
-        classification = row.get("classification") or row.get("致病性评级") or row.get("acmg_classification") or last_context["classification"]
-        conclusion = row.get("conclusion") or row.get("报告结论") or last_context["conclusion"]
-        variant = row.get("variant") or row.get("变异（标准转录本对应注释）") or row.get("variant_hgvs") or ""
+        family_id = first_present(row, WES_COLUMN_ALIASES["family_id"], last_context["family_id"])
+        sample_id = first_present(row, WES_COLUMN_ALIASES["sample_id"], last_context["sample_id"])
+        classification = first_present(row, WES_COLUMN_ALIASES["classification"], last_context["classification"])
+        conclusion = first_present(row, WES_COLUMN_ALIASES["conclusion"], last_context["conclusion"])
+        variant = first_present(row, WES_COLUMN_ALIASES["variant"], "")
         out.append({
             "family_id": family_id,
             "sample_id": sample_id,
@@ -466,6 +483,120 @@ def genes_from_xlsx(path):
     return genes, hit_rows
 
 
+def xlsx_sheet_rows(path):
+    ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    with zipfile.ZipFile(path) as zipf:
+        shared = xlsx_shared_strings(zipf)
+        sheets = [name for name in zipf.namelist() if name.startswith("xl/worksheets/sheet") and name.endswith(".xml")]
+        workbook = ET.fromstring(zipf.read("xl/workbook.xml"))
+        rels = ET.fromstring(zipf.read("xl/_rels/workbook.xml.rels"))
+        rel_map = {rel.attrib.get("Id"): rel.attrib.get("Target", "") for rel in rels}
+        sheet_meta = workbook.findall(".//m:sheets/m:sheet", ns)
+        ordered = []
+        for idx, sheet in enumerate(sheet_meta):
+            rid = sheet.attrib.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id", "")
+            target = rel_map.get(rid, "")
+            name = sheet.attrib.get("name", f"sheet{idx+1}")
+            ordered.append((name, f"xl/{target}" if not target.startswith("xl/") else target))
+        if not ordered:
+            ordered = [(Path(s).stem, s) for s in sheets]
+        for sheet_name, sheet_path in ordered:
+            if sheet_path not in zipf.namelist():
+                continue
+            root = ET.fromstring(zipf.read(sheet_path))
+            for row in root.findall(".//m:row", ns):
+                values = []
+                for cell in row.findall("m:c", ns):
+                    ctype = cell.attrib.get("t")
+                    if ctype == "inlineStr":
+                        parts = [node.text or "" for node in cell.findall(".//m:t", ns)]
+                        values.append("".join(parts))
+                        continue
+                    v = cell.find("m:v", ns)
+                    if v is None or v.text is None:
+                        values.append("")
+                        continue
+                    text = v.text
+                    if ctype == "s":
+                        try:
+                            text = shared[int(text)]
+                        except Exception:
+                            pass
+                    values.append(text)
+                yield sheet_name, values
+
+
+def safe_float(value):
+    try:
+        return float(value)
+    except Exception:
+        return 0.0
+
+
+def parse_rpgr_deg_support(dataset_dir):
+    dataset_dir = Path(dataset_dir)
+    support = {}
+    notes = []
+    xlsx_files = sorted(dataset_dir.glob("*.xlsx")) or sorted(dataset_dir.glob("**/*.xlsx"))
+    for path in xlsx_files:
+        row_count = 0
+        for sheet_name, values in xlsx_sheet_rows(path):
+            if not values:
+                continue
+            row_count += 1
+            upper_name = path.name.upper()
+            if row_count == 1:
+                continue
+            if "MOESM2" in upper_name:
+                gene = upper_gene(values[0] if len(values) > 0 else "")
+                avg_log2fc = safe_float(values[2] if len(values) > 2 else 0)
+                diff = clean(values[6] if len(values) > 6 else "").lower()
+                context = "rpgr_group_deg"
+                detail = "control_vs_rpgr_group"
+            elif "MOESM3" in upper_name:
+                gene = upper_gene((values[1] if len(values) > 1 and clean(values[1]) else values[0] if values else ""))
+                avg_log2fc = safe_float(values[3] if len(values) > 3 else 0)
+                cluster = clean(values[7] if len(values) > 7 else sheet_name)
+                diff = "up" if avg_log2fc > 0 else "down" if avg_log2fc < 0 else ""
+                context = "rpgr_time_deg"
+                detail = cluster or "time_group"
+            elif "MOESM4" in upper_name:
+                gene = upper_gene((values[1] if len(values) > 1 and clean(values[1]) else values[0] if values else ""))
+                avg_log2fc = safe_float(values[3] if len(values) > 3 else 0)
+                cluster = clean(values[7] if len(values) > 7 else sheet_name)
+                diff = "up" if avg_log2fc > 0 else "down" if avg_log2fc < 0 else ""
+                context = "rpgr_celltype_deg"
+                detail = cluster or "cell_type_group"
+            else:
+                continue
+            if not gene or not re.fullmatch(r"[A-Z0-9_.-]{2,40}", gene):
+                continue
+            if abs(avg_log2fc) < 0.25:
+                continue
+            entry = support.setdefault(gene, {
+                "contexts": set(),
+                "details": set(),
+                "directions": set(),
+                "max_abs_log2fc": 0.0,
+            })
+            entry["contexts"].add(context)
+            if detail:
+                entry["details"].add(detail)
+            if diff:
+                entry["directions"].add(diff)
+            entry["max_abs_log2fc"] = max(float(entry["max_abs_log2fc"]), abs(avg_log2fc))
+        notes.append(f"{path.name}:deg_rows={row_count}")
+    normalized = {}
+    for gene, entry in support.items():
+        normalized[gene] = {
+            "contexts": sorted(entry["contexts"]),
+            "details": sorted(entry["details"]),
+            "directions": sorted(entry["directions"]),
+            "max_abs_log2fc": round(entry["max_abs_log2fc"], 4),
+        }
+    return normalized, notes
+
+
 def inspect_dataset_files(dataset_dir):
     genes = set()
     notes = []
@@ -528,11 +659,12 @@ def wes_score(row):
     return score
 
 
-def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_table, dataset_expression_support=None):
+def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_table, dataset_expression_support=None, dataset_disease_support=None):
     variant_rows = []
     evidence_rows = []
     gene_agg = {}
     dataset_expression_support = dataset_expression_support or {}
+    dataset_disease_support = dataset_disease_support or {}
 
     disease_dataset_ids = [d for d in dataset_gene_sets if any(x in d.lower() for x in ("rd1", "rd10", "rpgr"))]
     normal_dataset_ids = [d for d in dataset_gene_sets if "normal" in d.lower() or "nsr" in d.lower()]
@@ -546,6 +678,7 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
         disease_hits = [d for d in disease_dataset_ids if gene in dataset_gene_sets.get(d, set())]
         any_hits = [d for d, genes in dataset_gene_sets.items() if gene in genes]
         expression_hits = {d: dataset_expression_support.get(d, {}).get(gene, {}) for d in normal_dataset_ids if dataset_expression_support.get(d, {}).get(gene)}
+        disease_evidence_hits = {d: dataset_disease_support.get(d, {}).get(gene, {}) for d in disease_dataset_ids if dataset_disease_support.get(d, {}).get(gene)}
         prior = GENE_CELL_PRIORS.get(gene)
         public_row = public_gene_table.get(gene, {})
         public_rp_related = public_row.get("rp_related", "") == "yes"
@@ -557,6 +690,8 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
             expression_score += 10
         if expression_hits:
             expression_score += 15
+        if disease_evidence_hits:
+            expression_score += 20
         if disease_hits:
             expression_score += 15 + 5 * min(len(disease_hits), 3)
         elif any_hits:
@@ -575,11 +710,18 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
         elif best_expression_fraction >= 0.05:
             expression_score += 5
         expression_cell_types = sorted({cell_type for hit in expression_hits.values() for cell_type in hit.get("cell_types", [])})
+        disease_contexts = sorted({ctx for hit in disease_evidence_hits.values() for ctx in hit.get("contexts", [])})
+        disease_details = sorted({detail for hit in disease_evidence_hits.values() for detail in hit.get("details", [])})
+        disease_max_abs_log2fc = max((hit.get("max_abs_log2fc", 0.0) for hit in disease_evidence_hits.values()), default=0.0)
+        if disease_max_abs_log2fc >= 1.0:
+            expression_score += 10
+        elif disease_max_abs_log2fc >= 0.5:
+            expression_score += 5
 
         downgrade = []
         if not any_hits:
             downgrade.append("gene_not_observed_in_downloaded_matrices_or_supplements")
-        if disease_hits and not normal_hits:
+        if (disease_hits or disease_evidence_hits) and not normal_hits:
             downgrade.append("support_from_disease_model_only")
         if normal_hits and not expression_hits:
             downgrade.append("normal_dataset_present_but_no_celltype_expression_summary")
@@ -600,6 +742,9 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
             "cell_type_support": ";".join(cell_types),
             "normal_celltype_expression_support": ";".join(expression_cell_types),
             "normal_best_expression_fraction": best_expression_fraction,
+            "disease_model_support": ";".join(disease_contexts),
+            "disease_model_detail": ";".join(disease_details),
+            "disease_max_abs_log2fc": disease_max_abs_log2fc,
             "state_module_support": ";".join(modules),
             "normal_dataset_hits": ";".join(normal_hits),
             "disease_dataset_hits": ";".join(disease_hits),
@@ -608,7 +753,7 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
             "downgrade_flags": ";".join(sorted(set(downgrade))),
             "classification": row.get("classification", ""),
             "conclusion": row.get("conclusion", ""),
-            "interpretation": build_interpretation(gene, cell_types, modules, disease_hits, downgrade),
+            "interpretation": build_interpretation(gene, cell_types, modules, disease_hits, downgrade, disease_contexts=disease_contexts, disease_details=disease_details),
         }
         evidence_rows.append(evidence)
         variant_rows.append(evidence.copy())
@@ -624,6 +769,9 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
             "cell_type_support": set(),
             "normal_celltype_expression_support": set(),
             "normal_best_expression_fraction": 0.0,
+            "disease_model_support": set(),
+            "disease_model_detail": set(),
+            "disease_max_abs_log2fc": 0.0,
             "state_module_support": set(),
             "normal_dataset_hits": set(),
             "disease_dataset_hits": set(),
@@ -644,6 +792,9 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
         agg["cell_type_support"].update(cell_types)
         agg["normal_celltype_expression_support"].update(expression_cell_types)
         agg["normal_best_expression_fraction"] = max(float(agg["normal_best_expression_fraction"]), float(best_expression_fraction))
+        agg["disease_model_support"].update(disease_contexts)
+        agg["disease_model_detail"].update(disease_details)
+        agg["disease_max_abs_log2fc"] = max(float(agg["disease_max_abs_log2fc"]), float(disease_max_abs_log2fc))
         agg["state_module_support"].update(modules)
         agg["normal_dataset_hits"].update(normal_hits)
         agg["disease_dataset_hits"].update(disease_hits)
@@ -665,6 +816,9 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
             "cell_type_support": ";".join(sorted(agg["cell_type_support"])),
             "normal_celltype_expression_support": ";".join(sorted(agg["normal_celltype_expression_support"])),
             "normal_best_expression_fraction": agg["normal_best_expression_fraction"],
+            "disease_model_support": ";".join(sorted(agg["disease_model_support"])),
+            "disease_model_detail": ";".join(sorted(agg["disease_model_detail"])),
+            "disease_max_abs_log2fc": agg["disease_max_abs_log2fc"],
             "state_module_support": ";".join(sorted(agg["state_module_support"])),
             "normal_dataset_hits": ";".join(sorted(agg["normal_dataset_hits"])),
             "disease_dataset_hits": ";".join(sorted(agg["disease_dataset_hits"])),
@@ -679,14 +833,19 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
     return gene_rows, variant_rows, evidence_rows
 
 
-def build_interpretation(gene, cell_types, modules, disease_hits, downgrade):
+def build_interpretation(gene, cell_types, modules, disease_hits, downgrade, disease_contexts=None, disease_details=None):
     parts = []
+    disease_contexts = disease_contexts or []
+    disease_details = disease_details or []
     if cell_types:
         parts.append(f"{gene} has RP-relevant cell-type support: {', '.join(cell_types)}")
     if modules:
         parts.append(f"mechanism module: {', '.join(modules)}")
     if disease_hits:
         parts.append(f"observed in disease-model datasets: {', '.join(disease_hits)}")
+    if disease_contexts:
+        detail_text = f" ({', '.join(disease_details[:4])})" if disease_details else ""
+        parts.append(f"disease DEG support: {', '.join(disease_contexts)}{detail_text}")
     if not parts:
         parts.append(f"{gene} needs manual review before using scRNA as support")
     if downgrade:
@@ -766,6 +925,7 @@ def main():
 
     dataset_gene_sets = {}
     dataset_expression_support = {}
+    dataset_disease_support = {}
     dataset_summaries = []
     for row in manifest_rows:
         dataset_id = row.get("dataset_id", "")
@@ -773,6 +933,7 @@ def main():
         genes, files, bytes_total, notes = inspect_dataset_files(dataset_dir)
         dataset_gene_sets[dataset_id] = genes
         expression_meta = {}
+        disease_notes = []
         if "lukowski" in dataset_id.lower():
             candidate_path = find_candidate_table(args.candidate_table)
             pre_candidates = read_candidates(candidate_path)
@@ -783,6 +944,11 @@ def main():
             dataset_expression_support[dataset_id] = expression_support
             if expression_meta.get("celltype_totals"):
                 notes.append(f"lukowski_celltypes={json.dumps(expression_meta['celltype_totals'], ensure_ascii=False)}")
+        if "rpgr" in dataset_id.lower():
+            disease_support, disease_notes = parse_rpgr_deg_support(dataset_dir)
+            dataset_disease_support[dataset_id] = disease_support
+            if disease_notes:
+                notes.extend(disease_notes)
         dataset_summaries.append({
             "dataset_id": dataset_id,
             "accession": row.get("accession", ""),
@@ -802,7 +968,14 @@ def main():
         for gene in ["RPGR", "PDE6B", "RHO", "USH2A", "CRB1", "EYS", "RPE65"]:
             candidates.append({"family_id": "", "sample_id": "", "gene": gene, "variant": "", "classification": "", "conclusion": "fallback_seed", "source_row": "{}"})
 
-    gene_rows, variant_rows, evidence_rows = build_scores(candidates, dataset_gene_sets, status_map, public_gene_table, dataset_expression_support=dataset_expression_support)
+    gene_rows, variant_rows, evidence_rows = build_scores(
+        candidates,
+        dataset_gene_sets,
+        status_map,
+        public_gene_table,
+        dataset_expression_support=dataset_expression_support,
+        dataset_disease_support=dataset_disease_support,
+    )
 
     write_tsv(out_dir / "read_check.tsv", dataset_summaries)
     write_tsv(out_dir / "gene_priority_ranking.tsv", gene_rows)

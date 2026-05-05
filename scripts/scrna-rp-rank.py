@@ -597,6 +597,142 @@ def parse_rpgr_deg_support(dataset_dir):
     return normalized, notes
 
 
+def sample_group_and_stage_from_name(name):
+    label = clean(name)
+    lower = label.lower()
+    stage_match = re.search(r"p(\d+)", lower)
+    stage = f"P{stage_match.group(1)}" if stage_match else ""
+    if "rd1" in lower:
+        return "rd1", stage
+    if "c3h" in lower or "wt" in lower or "control" in lower:
+        return "control", stage
+    if "rd10" in lower:
+        return "rd10", stage
+    return "", stage
+
+
+def read_rd1_sample_from_tar(tar, prefix):
+    feature_name = f"{prefix}_features.tsv.gz"
+    matrix_name = f"{prefix}_matrix.mtx.gz"
+    feature_obj = tar.extractfile(feature_name)
+    matrix_obj = tar.extractfile(matrix_name)
+    if feature_obj is None or matrix_obj is None:
+        return None
+
+    genes = []
+    with gzip.GzipFile(fileobj=feature_obj) as handle:
+        for raw in handle:
+            parts = raw.decode("utf-8", errors="ignore").rstrip("\n").split("\t")
+            gene_name = parts[1] if len(parts) > 1 else parts[0]
+            genes.append(upper_gene(gene_name))
+
+    import numpy as np  # type: ignore
+    totals = np.zeros(len(genes), dtype=np.float64)
+    detected = np.zeros(len(genes), dtype=np.int32)
+    n_cells = 0
+    with gzip.GzipFile(fileobj=matrix_obj) as handle:
+        dims_read = False
+        for raw in handle:
+            line = raw.decode("utf-8", errors="ignore").strip()
+            if not line or line.startswith("%"):
+                continue
+            if not dims_read:
+                parts = line.split()
+                if len(parts) >= 3:
+                    n_cells = int(parts[1])
+                    dims_read = True
+                continue
+            row_idx, _col_idx, value = line.split()
+            gene_idx = int(row_idx) - 1
+            count = float(value)
+            totals[gene_idx] += count
+            detected[gene_idx] += 1
+    return {
+        "genes": genes,
+        "totals": totals,
+        "detected": detected,
+        "cells": n_cells,
+    }
+
+
+def parse_rd1_deg_support(dataset_dir):
+    dataset_dir = Path(dataset_dir)
+    tar_path = next(iter(sorted(dataset_dir.glob("*.tar"))), None)
+    if tar_path is None:
+        tar_path = next(iter(sorted(dataset_dir.glob("**/*.tar"))), None)
+    if tar_path is None or not tar_path.exists():
+        return {}, []
+
+    notes = []
+    sample_profiles = {}
+    with tarfile.open(tar_path, "r:*") as tar:
+        prefixes = sorted({
+            member.name[:-len("_features.tsv.gz")]
+            for member in tar.getmembers()
+            if member.isfile() and member.name.endswith("_features.tsv.gz")
+        })
+        for prefix in prefixes:
+            group, stage = sample_group_and_stage_from_name(prefix)
+            if not group or not stage:
+                continue
+            profile = read_rd1_sample_from_tar(tar, prefix)
+            if profile is None:
+                continue
+            sample_profiles[(group, stage)] = profile
+            notes.append(f"{prefix}:cells={profile['cells']} genes={len(profile['genes'])}")
+
+    import numpy as np  # type: ignore
+    support = {}
+    for stage in sorted({stage for (_group, stage) in sample_profiles}):
+        control = sample_profiles.get(("control", stage))
+        disease = sample_profiles.get(("rd1", stage))
+        if not control or not disease:
+            continue
+        if control["genes"] != disease["genes"]:
+            notes.append(f"{stage}:gene_order_mismatch")
+            continue
+        control_norm = (control["totals"] / max(float(control["totals"].sum()), 1.0)) * 1_000_000.0
+        disease_norm = (disease["totals"] / max(float(disease["totals"].sum()), 1.0)) * 1_000_000.0
+        log2fc = np.log2((disease_norm + 1.0) / (control_norm + 1.0))
+        control_detect = control["detected"] / max(int(control["cells"]), 1)
+        disease_detect = disease["detected"] / max(int(disease["cells"]), 1)
+        detect_delta = disease_detect - control_detect
+        active_mask = (
+            (np.abs(log2fc) >= 0.5)
+            & ((control["totals"] + disease["totals"]) >= 20)
+        ) | (np.abs(detect_delta) >= 0.1)
+        hit_count = int(np.count_nonzero(active_mask))
+        notes.append(f"rd1_{stage}:deg_like_genes={hit_count}")
+        indices = np.where(active_mask)[0]
+        for idx in indices.tolist():
+            gene = control["genes"][idx]
+            if not gene or not re.fullmatch(r"[A-Z0-9_.-]{2,40}", gene):
+                continue
+            fold_change = float(log2fc[idx])
+            direction = "up" if fold_change > 0 else "down" if fold_change < 0 else ""
+            entry = support.setdefault(gene, {
+                "contexts": set(),
+                "details": set(),
+                "directions": set(),
+                "max_abs_log2fc": 0.0,
+            })
+            entry["contexts"].add("rd1_stage_deg")
+            entry["details"].add(f"{stage} rd1_vs_C3H")
+            if direction:
+                entry["directions"].add(direction)
+            entry["max_abs_log2fc"] = max(float(entry["max_abs_log2fc"]), abs(fold_change))
+
+    normalized = {}
+    for gene, entry in support.items():
+        normalized[gene] = {
+            "contexts": sorted(entry["contexts"]),
+            "details": sorted(entry["details"]),
+            "directions": sorted(entry["directions"]),
+            "max_abs_log2fc": round(entry["max_abs_log2fc"], 4),
+        }
+    return normalized, notes
+
+
 def inspect_dataset_files(dataset_dir):
     genes = set()
     notes = []
@@ -683,40 +819,44 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
         public_row = public_gene_table.get(gene, {})
         public_rp_related = public_row.get("rp_related", "") == "yes"
 
-        expression_score = 0
+        normal_score = 0
         if cell_types:
-            expression_score += 20
+            normal_score += 20
         if normal_hits:
-            expression_score += 10
+            normal_score += 10
         if expression_hits:
-            expression_score += 15
+            normal_score += 15
+
+        disease_score = 0
         if disease_evidence_hits:
-            expression_score += 20
+            disease_score += 20
         if disease_hits:
-            expression_score += 15 + 5 * min(len(disease_hits), 3)
-        elif any_hits:
-            expression_score += 5
+            disease_score += 15 + 5 * min(len(disease_hits), 3)
+
+        pathway_score = 0
         if modules:
-            expression_score += 10
+            pathway_score += 10
         if prior:
-            expression_score += 10
+            pathway_score += 10
         if public_row:
-            expression_score += 10
+            pathway_score += 10
         if public_rp_related:
-            expression_score += 10
+            pathway_score += 10
         best_expression_fraction = max((hit.get("best_fraction", 0.0) for hit in expression_hits.values()), default=0.0)
         if best_expression_fraction >= 0.2:
-            expression_score += 10
+            normal_score += 10
         elif best_expression_fraction >= 0.05:
-            expression_score += 5
+            normal_score += 5
         expression_cell_types = sorted({cell_type for hit in expression_hits.values() for cell_type in hit.get("cell_types", [])})
         disease_contexts = sorted({ctx for hit in disease_evidence_hits.values() for ctx in hit.get("contexts", [])})
         disease_details = sorted({detail for hit in disease_evidence_hits.values() for detail in hit.get("details", [])})
         disease_max_abs_log2fc = max((hit.get("max_abs_log2fc", 0.0) for hit in disease_evidence_hits.values()), default=0.0)
         if disease_max_abs_log2fc >= 1.0:
-            expression_score += 10
+            disease_score += 10
         elif disease_max_abs_log2fc >= 0.5:
-            expression_score += 5
+            disease_score += 5
+
+        expression_score = normal_score + disease_score + pathway_score
 
         downgrade = []
         if not any_hits:
@@ -737,6 +877,9 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
             "sample_id": row.get("sample_id", ""),
             "variant": row.get("variant", ""),
             "wes_score": base,
+            "normal_celltype_score": normal_score,
+            "disease_model_score": disease_score,
+            "pathway_module_score": pathway_score,
             "scrna_support_score": expression_score,
             "total_priority_score": total,
             "cell_type_support": ";".join(cell_types),
@@ -765,6 +908,9 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
             "samples": set(),
             "best_total_priority_score": -999,
             "best_wes_score": 0,
+            "best_normal_celltype_score": 0,
+            "best_disease_model_score": 0,
+            "best_pathway_module_score": 0,
             "best_scrna_support_score": 0,
             "cell_type_support": set(),
             "normal_celltype_expression_support": set(),
@@ -788,6 +934,9 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
             agg["best_total_priority_score"] = total
             agg["top_interpretation"] = evidence["interpretation"]
         agg["best_wes_score"] = max(agg["best_wes_score"], base)
+        agg["best_normal_celltype_score"] = max(agg["best_normal_celltype_score"], normal_score)
+        agg["best_disease_model_score"] = max(agg["best_disease_model_score"], disease_score)
+        agg["best_pathway_module_score"] = max(agg["best_pathway_module_score"], pathway_score)
         agg["best_scrna_support_score"] = max(agg["best_scrna_support_score"], expression_score)
         agg["cell_type_support"].update(cell_types)
         agg["normal_celltype_expression_support"].update(expression_cell_types)
@@ -808,6 +957,9 @@ def build_scores(candidates, dataset_gene_sets, dataset_status, public_gene_tabl
             "gene": agg["gene"],
             "best_total_priority_score": agg["best_total_priority_score"],
             "best_wes_score": agg["best_wes_score"],
+            "best_normal_celltype_score": agg["best_normal_celltype_score"],
+            "best_disease_model_score": agg["best_disease_model_score"],
+            "best_pathway_module_score": agg["best_pathway_module_score"],
             "best_scrna_support_score": agg["best_scrna_support_score"],
             "variant_count": agg["variant_count"],
             "family_count": len(agg["families"]),
@@ -946,6 +1098,11 @@ def main():
                 notes.append(f"lukowski_celltypes={json.dumps(expression_meta['celltype_totals'], ensure_ascii=False)}")
         if "rpgr" in dataset_id.lower():
             disease_support, disease_notes = parse_rpgr_deg_support(dataset_dir)
+            dataset_disease_support[dataset_id] = disease_support
+            if disease_notes:
+                notes.extend(disease_notes)
+        if "rd1" in dataset_id.lower():
+            disease_support, disease_notes = parse_rd1_deg_support(dataset_dir)
             dataset_disease_support[dataset_id] = disease_support
             if disease_notes:
                 notes.extend(disease_notes)
